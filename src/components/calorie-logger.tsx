@@ -1425,7 +1425,8 @@ export default function CalorieLogger() {
                     </>
                 ) : (
                     <>
-                        <p className="font-semibold text-base truncate">{entry.foodItem || '未知食物'}</p>
+                        {/* Apply line-clamp for food item name */}
+                        <p className="font-semibold text-base line-clamp-2 break-words">{entry.foodItem || '未知食物'}</p>
                         <p className="text-sm text-primary">
                            {typeof entry.calorieEstimate === 'number' && !isNaN(entry.calorieEstimate) ? entry.calorieEstimate : '??'} 大卡
                         </p>
@@ -1445,7 +1446,8 @@ export default function CalorieLogger() {
                             {entry.location && (
                                 <div className="flex items-center">
                                     <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
-                                    <span className="truncate">{entry.location}</span>
+                                    {/* Apply line-clamp for location */}
+                                    <span className="line-clamp-2 break-words">{entry.location}</span>
                                 </div>
                             )}
                             {entry.amount !== undefined && entry.amount !== null && typeof entry.amount === 'number' && !isNaN(entry.amount) && (
@@ -1825,4 +1827,3 @@ export default function CalorieLogger() {
     </div>
   );
 }
-
