@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
@@ -60,28 +61,31 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
         console.warn(`Attempted to set localStorage key “${key}” server-side.`);
         return;
     }
-    try {
-        const valueToStore = value instanceof Function ? value(storedValue) : value;
+    // Use a function form for setStoredValue to avoid depending on storedValue
+    setStoredValue(currentStoredValue => {
+      try {
+        // Determine the value to store. If 'value' is a function, call it with the current state.
+        const valueToStore = value instanceof Function ? value(currentStoredValue) : value;
+        // Attempt to save to localStorage
         window.localStorage.setItem(key, JSON.stringify(valueToStore));
-        setStoredValue(valueToStore); // Update state only after successful storage set
-        setError(null); // Clear any previous error on success
-    } catch (err) {
+        // Clear any previous error on success
+        setError(null);
+        // Return the new value to update the React state
+        return valueToStore;
+      } catch (err) {
+        // Handle potential errors during saving
         if (err instanceof DOMException && (err.name === 'QuotaExceededError' || err.code === 22)) {
-            console.error(`LocalStorage quota exceeded when setting key “${key}”.`);
-            const quotaError = new LocalStorageError(`Failed to save data for "${key}". Browser storage quota exceeded.`);
-            setError(quotaError); // Set the error state
-            // Optionally re-throw if the caller needs to handle it immediately,
-            // but setting state is often sufficient for UI feedback.
-             // throw quotaError;
+          console.error(`LocalStorage quota exceeded when setting key “${key}”.`);
+          setError(new LocalStorageError(`Failed to save data for "${key}". Browser storage quota exceeded.`));
         } else {
-            console.error(`Error setting localStorage key “${key}”:`, err);
-            const unknownError = new LocalStorageError(`An unexpected error occurred while saving data for "${key}".`);
-            setError(unknownError); // Set the error state
-             // throw unknownError;
+          console.error(`Error setting localStorage key “${key}”:`, err);
+          setError(new LocalStorageError(`An unexpected error occurred while saving data for "${key}".`));
         }
-        // Do not update React state (storedValue) if localStorage.setItem failed
-    }
-  }, [key, storedValue]); // storedValue is needed if the value is a function
+        // Return the current value to prevent state change on error
+        return currentStoredValue;
+      }
+    });
+  }, [key]); // Remove storedValue from dependency array
 
 
   // Return the state, the error-handling setter, and the error state
