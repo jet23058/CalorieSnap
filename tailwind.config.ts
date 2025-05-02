@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -92,6 +93,6 @@ export default {
   },
   plugins: [
     require("tailwindcss-animate"),
-    require("@tailwindcss/line-clamp"), // Added line-clamp plugin
+    // Removed line-clamp plugin
   ],
 } satisfies Config;

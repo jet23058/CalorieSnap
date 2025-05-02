@@ -89,7 +89,8 @@ body {
   }
 }
 
-/* Custom utility for line clamping */
+/* Removed custom utility for line clamping */
+/*
 @layer utilities {
   .line-clamp-1 {
     overflow: hidden;
@@ -109,5 +110,6 @@ body {
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
   }
-  /* Add more line-clamp utilities as needed */
+  /* Add more line-clamp utilities as needed * /
 }
+*/

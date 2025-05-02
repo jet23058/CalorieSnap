@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -7,14 +8,15 @@ import { cn } from "@/lib/utils"
 
 const Progress = React.forwardRef<
   React.ElementRef<typeof ProgressPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root>
->(({ className, value, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root> & { "aria-label"?: string } // Add aria-label prop
+>(({ className, value, "aria-label": ariaLabel, ...props }, ref) => (
   <ProgressPrimitive.Root
     ref={ref}
     className={cn(
       "relative h-4 w-full overflow-hidden rounded-full bg-secondary",
       className
     )}
+    aria-label={ariaLabel} // Pass aria-label
     {...props}
   >
     <ProgressPrimitive.Indicator

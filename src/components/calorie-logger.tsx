@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
@@ -15,13 +16,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingSpinner } from '@/components/loading-spinner';
-import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban } from 'lucide-react'; // Added ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban
+import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban, GlassWater, Droplet, PersonStanding, CalendarDays } from 'lucide-react'; // Added ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban, GlassWater, Droplet, PersonStanding, CalendarDays
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog'; // Import Dialog components including DialogDescription
 import ReactCrop, { type Crop as CropType, centerCrop, makeAspectCrop, PixelCrop } from 'react-image-crop'; // Import react-image-crop
 import 'react-image-crop/dist/ReactCrop.css'; // Import css styles for react-image-crop
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for placeholder
 import { format, startOfDay, parseISO, isValid, isDate } from 'date-fns'; // Import date-fns functions, add isValid, isDate
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"; // Import Alert
+import { Progress } from "@/components/ui/progress"; // Import Progress component
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -47,6 +49,14 @@ const activityLevelMultipliers: Record<ActivityLevel, number> = {
     very_active: 1.725,
 };
 
+// Gender Types
+type Gender = 'male' | 'female' | 'other';
+const genderTranslations: Record<Gender, string> = {
+    male: '男性',
+    female: '女性',
+    other: '其他',
+};
+
 
 // Interface for the data stored in localStorage - includes editable fields
 interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem' | 'calorieEstimate'> {
@@ -64,8 +74,10 @@ interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem' | 
 interface UserProfile {
     height?: number; // in cm
     weight?: number; // in kg
+    age?: number; // in years
+    gender?: Gender;
     activityLevel?: ActivityLevel;
-    // Add gender and age later if needed for more accurate calculations
+    targetWaterIntake?: number; // in ml
 }
 
 // Daily Summary Interface
@@ -73,6 +85,7 @@ interface DailySummary {
     date: string; // YYYY-MM-DD
     totalCalories: number;
     totalAmount: number;
+    totalWaterIntake: number; // Added water intake
     entries: LogEntryStorage[];
 }
 
@@ -184,23 +197,56 @@ function getCroppedImg(
 
       },
       'image/jpeg', // Use JPEG for better compression than PNG
-      IMAGE_QUALITY // Use the same quality setting
+      IMAGE_QUALITY // Use the defined quality setting
     );
   });
 }
 
-// Simple BMR Calculation (Mifflin-St Jeor Equation - Simplified, assumes age 30, male for demo)
-// A real app should ask for age and gender.
-const calculateEstimatedNeeds = (profile: UserProfile): number | null => {
-    if (!profile.weight || !profile.height || !profile.activityLevel) {
-        return null; // Not enough info
+// Mifflin-St Jeor Equation for BMR Calculation
+const calculateBMR = (profile: UserProfile): number | null => {
+    if (!profile.weight || !profile.height || !profile.age || !profile.gender) {
+        return null; // Need weight, height, age, and gender
     }
-    // Simplified: Using male formula and assuming age 30
-    // BMR = (10 * weight in kg) + (6.25 * height in cm) - (5 * age) + 5
-    const age = 30; // Assumption
-    const bmr = (10 * profile.weight) + (6.25 * profile.height) - (5 * age) + 5;
+    let bmr: number;
+    if (profile.gender === 'male') {
+        bmr = (10 * profile.weight) + (6.25 * profile.height) - (5 * profile.age) + 5;
+    } else if (profile.gender === 'female') {
+        bmr = (10 * profile.weight) + (6.25 * profile.height) - (5 * profile.age) - 161;
+    } else {
+        // For 'other', maybe average or use a specific formula if available
+        // Averaging male and female for now as a placeholder
+        const bmrMale = (10 * profile.weight) + (6.25 * profile.height) - (5 * profile.age) + 5;
+        const bmrFemale = (10 * profile.weight) + (6.25 * profile.height) - (5 * profile.age) - 161;
+        bmr = (bmrMale + bmrFemale) / 2;
+    }
+    return Math.round(bmr);
+};
+
+// Calculate Estimated Daily Calorie Needs (TDEE)
+const calculateEstimatedNeeds = (profile: UserProfile): number | null => {
+    const bmr = calculateBMR(profile);
+    if (bmr === null || !profile.activityLevel) {
+        return null; // Need BMR and activity level
+    }
     const multiplier = activityLevelMultipliers[profile.activityLevel];
     return Math.round(bmr * multiplier);
+};
+
+// Calculate Recommended Water Intake (Simple formula: 30-35ml per kg of body weight)
+const calculateRecommendedWater = (weightKg?: number): number | null => {
+    if (!weightKg) return null;
+    // Using 35ml per kg as a general guideline
+    return Math.round(weightKg * 35);
+};
+
+// Calculate BMI
+const calculateBMI = (heightCm?: number, weightKg?: number): number | null => {
+    if (!heightCm || !weightKg || heightCm <= 0 || weightKg <= 0) {
+        return null;
+    }
+    const heightM = heightCm / 100;
+    const bmi = weightKg / (heightM * heightM);
+    return parseFloat(bmi.toFixed(1)); // Return BMI rounded to one decimal place
 };
 
 // Format date/time for datetime-local input
@@ -247,6 +293,8 @@ export default function CalorieLogger() {
   // Destructure error from the hook
   const [calorieLog, setCalorieLog, storageError] = useLocalStorage<LogEntryStorage[]>('calorieLog', []);
   const [userProfile, setUserProfile, profileStorageError] = useLocalStorage<UserProfile>('userProfile', {});
+  // Store daily water intake separately for simplicity, keyed by date 'YYYY-MM-DD'
+  const [waterLog, setWaterLog, waterStorageError] = useLocalStorage<Record<string, number>>('waterLog', {});
   const [dailySummaries, setDailySummaries] = useState<DailySummary[]>([]); // State for daily summaries
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -281,6 +329,10 @@ export default function CalorieLogger() {
   // Ref to track if a log operation was just attempted
   const logAttemptedRef = useRef(false);
 
+  // State for water logging
+  const [waterAmountToAdd, setWaterAmountToAdd] = useState<string>(''); // In ml
+  const [currentWaterIntake, setCurrentWaterIntake] = useState<number>(0); // Today's intake
+
   // Set isClient to true only after component mounts on the client
   useEffect(() => {
     setIsClient(true);
@@ -306,7 +358,15 @@ export default function CalorieLogger() {
             duration: 7000,
         });
      }
-   }, [storageError, profileStorageError, toast]); // Depend on the error objects
+      if (waterStorageError instanceof LocalStorageError) {
+        toast({
+            title: "飲水記錄儲存錯誤",
+            description: waterStorageError.message,
+            variant: "destructive",
+            duration: 7000,
+        });
+     }
+   }, [storageError, profileStorageError, waterStorageError, toast]); // Depend on the error objects
 
 
   // Cleanup camera stream on unmount or when camera is closed
@@ -318,7 +378,14 @@ export default function CalorieLogger() {
     };
   }, [stream]);
 
-  // Calculate Daily Summaries when log changes
+  // Update current water intake when waterLog or client status changes
+  useEffect(() => {
+     if (!isClient) return;
+     const todayDate = format(startOfDay(new Date()), 'yyyy-MM-dd');
+     setCurrentWaterIntake(waterLog[todayDate] ?? 0);
+  }, [waterLog, isClient]);
+
+  // Calculate Daily Summaries when log or waterLog changes
   useEffect(() => {
     if (!isClient || !Array.isArray(calorieLog)) { // Ensure calorieLog is an array
         setDailySummaries([]); // Clear summaries if log is empty, not an array, or not on client
@@ -327,6 +394,7 @@ export default function CalorieLogger() {
 
     const summaries: { [date: string]: DailySummary } = {};
 
+    // Process calorie logs
     calorieLog.forEach(entry => {
        if (!entry || typeof entry !== 'object' || !entry.timestamp || typeof entry.timestamp !== 'number') {
             console.warn("Skipping invalid log entry:", entry);
@@ -347,6 +415,7 @@ export default function CalorieLogger() {
                     date: entryDate,
                     totalCalories: 0,
                     totalAmount: 0,
+                    totalWaterIntake: waterLog[entryDate] ?? 0, // Get water intake for this date
                     entries: []
                 };
             }
@@ -365,6 +434,22 @@ export default function CalorieLogger() {
            // Skip this entry if date processing fails
        }
     });
+
+     // Ensure summaries exist for dates with only water intake
+     Object.keys(waterLog).forEach(waterDate => {
+         if (!summaries[waterDate] && waterLog[waterDate] > 0) {
+             summaries[waterDate] = {
+                 date: waterDate,
+                 totalCalories: 0,
+                 totalAmount: 0,
+                 totalWaterIntake: waterLog[waterDate],
+                 entries: []
+             };
+         } else if (summaries[waterDate]) {
+             // Update existing summary if water was logged but no calories
+             summaries[waterDate].totalWaterIntake = waterLog[waterDate];
+         }
+     });
 
     // Sort entries within each summary by timestamp (descending) - Safely
     Object.values(summaries).forEach(summary => {
@@ -385,7 +470,7 @@ export default function CalorieLogger() {
 
 
     setDailySummaries(sortedSummaries);
-  }, [calorieLog, isClient]); // Re-run when log or client status changes
+  }, [calorieLog, waterLog, isClient]); // Re-run when log, waterLog or client status changes
 
 
   // Function to fetch current location
@@ -847,7 +932,9 @@ export default function CalorieLogger() {
         setCalorieLog(prevLog => {
            // Ensure prevLog is an array before spreading
            const currentLog = Array.isArray(prevLog) ? prevLog : [];
-           return [newLogEntry, ...currentLog].slice(0, MAX_LOG_ENTRIES);
+           // Filter out potential duplicates based on ID (though unlikely with timestamp ID)
+           const filteredLog = currentLog.filter(entry => entry.id !== newLogEntry.id);
+           return [newLogEntry, ...filteredLog].slice(0, MAX_LOG_ENTRIES);
         });
         // Toast for success moved to useEffect to ensure state update and check for storage error
 
@@ -1065,23 +1152,71 @@ export default function CalorieLogger() {
   };
   // --- End Edit Entry Functions ---
 
+  // --- Water Log Functions ---
+  const addWater = () => {
+    const amountMl = parseInt(waterAmountToAdd, 10);
+    if (isNaN(amountMl) || amountMl <= 0) {
+      toast({ title: "輸入錯誤", description: "請輸入有效的飲水量 (毫升)。", variant: "destructive" });
+      return;
+    }
+
+    const todayDate = format(startOfDay(new Date()), 'yyyy-MM-dd');
+    try {
+        setWaterLog(prevLog => {
+            const currentLog = typeof prevLog === 'object' && prevLog !== null ? prevLog : {};
+            const newTotal = (currentLog[todayDate] ?? 0) + amountMl;
+            return { ...currentLog, [todayDate]: newTotal };
+        });
+         // Check for error after update
+         if (!waterStorageError) {
+             setWaterAmountToAdd(''); // Clear input on success
+             toast({
+                 title: "飲水記錄成功",
+                 description: `已新增 ${amountMl} 毫升飲水記錄。今日總計: ${currentWaterIntake + amountMl} 毫升。`,
+             });
+         }
+    } catch (saveError) {
+        console.error("Error explicitly caught while saving water log:", saveError);
+         if (saveError instanceof LocalStorageError) {
+             toast({ title: "飲水記錄錯誤", description: saveError.message, variant: "destructive", duration: 7000 });
+         } else {
+            toast({ title: "飲水記錄錯誤", description: "儲存飲水記錄時發生未預期的錯誤。", variant: "destructive" });
+         }
+    }
+  };
+
+  // --- End Water Log Functions ---
+
+
   // Handlers for User Profile Input - Using useCallback with dependency on setUserProfile
- const handleProfileChange = useCallback((field: keyof UserProfile, value: string | ActivityLevel | undefined) => {
+ const handleProfileChange = useCallback((field: keyof UserProfile, value: string | Gender | ActivityLevel | undefined) => {
      if (!isClient) return; // Do nothing server-side
 
     setUserProfile(prev => {
         // Ensure prev is an object, default to empty if not
         const currentProfile = typeof prev === 'object' && prev !== null ? prev : {};
         const newProfile = { ...currentProfile };
-        let processedValue: number | ActivityLevel | undefined;
+        let processedValue: number | Gender | ActivityLevel | undefined;
 
-        if (field === 'height' || field === 'weight') {
+        if (field === 'height' || field === 'weight' || field === 'age' || field === 'targetWaterIntake') {
             const numValue = value === '' ? undefined : parseFloat(value as string);
             processedValue = numValue !== undefined && !isNaN(numValue) && numValue >= 0 ? numValue : undefined;
+            // For age, ensure integer
+            if (field === 'age' && processedValue !== undefined) {
+                processedValue = Math.floor(processedValue);
+            }
+             // For targetWaterIntake, ensure integer
+            if (field === 'targetWaterIntake' && processedValue !== undefined) {
+                processedValue = Math.floor(processedValue);
+            }
         } else if (field === 'activityLevel') {
             const validLevels = Object.keys(activityLevelTranslations);
             processedValue = validLevels.includes(value as string) ? (value as ActivityLevel) : undefined;
-        } else {
+        } else if (field === 'gender') {
+             const validGenders = Object.keys(genderTranslations);
+             processedValue = validGenders.includes(value as string) ? (value as Gender) : undefined;
+        }
+        else {
              return prev; // Return original state if field is unknown
         }
 
@@ -1096,6 +1231,9 @@ export default function CalorieLogger() {
 
 
   const estimatedDailyNeeds = useMemo(() => calculateEstimatedNeeds(userProfile), [userProfile]);
+  const basalMetabolicRate = useMemo(() => calculateBMR(userProfile), [userProfile]); // Calculate BMR
+  const bodyMassIndex = useMemo(() => calculateBMI(userProfile.height, userProfile.weight), [userProfile.height, userProfile.weight]); // Calculate BMI
+  const recommendedWater = useMemo(() => calculateRecommendedWater(userProfile.weight), [userProfile.weight]); // Calculate recommended water based on weight
 
 
   const triggerFileInput = () => {
@@ -1361,7 +1499,7 @@ export default function CalorieLogger() {
             </div>
 
             {/* Content / Edit Form */}
-            <div className="flex-1 space-y-2 overflow-hidden">
+            <div className="flex-1 space-y-2 overflow-hidden min-w-0"> {/* Add min-w-0 */}
                 {isEditing ? (
                     <>
                         {/* Food Item */}
@@ -1425,8 +1563,8 @@ export default function CalorieLogger() {
                     </>
                 ) : (
                     <>
-                        {/* Apply line-clamp for food item name */}
-                        <p className="font-semibold text-base line-clamp-2 break-words">{entry.foodItem || '未知食物'}</p>
+                        {/* Use truncate utility, allow word breaking */}
+                        <p className="font-semibold text-base truncate break-words">{entry.foodItem || '未知食物'}</p>
                         <p className="text-sm text-primary">
                            {typeof entry.calorieEstimate === 'number' && !isNaN(entry.calorieEstimate) ? entry.calorieEstimate : '??'} 大卡
                         </p>
@@ -1446,8 +1584,8 @@ export default function CalorieLogger() {
                             {entry.location && (
                                 <div className="flex items-center">
                                     <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
-                                    {/* Apply line-clamp for location */}
-                                    <span className="line-clamp-2 break-words">{entry.location}</span>
+                                     {/* Use truncate utility, allow word breaking */}
+                                    <span className="truncate break-words">{entry.location}</span>
                                 </div>
                             )}
                             {entry.amount !== undefined && entry.amount !== null && typeof entry.amount === 'number' && !isNaN(entry.amount) && (
@@ -1490,7 +1628,7 @@ export default function CalorieLogger() {
 
   return (
     <div className="flex flex-col md:flex-row gap-8">
-       {/* Left Column: Image Capture, Estimation, Profile */}
+       {/* Left Column: Image Capture, Estimation, Profile, Water */}
       <div className="md:w-1/2 space-y-6">
         <Card>
           <CardHeader>
@@ -1639,11 +1777,78 @@ export default function CalorieLogger() {
        {/* Render Estimation/Log Details Card - Show if we have a result OR if there was an error during estimation */}
         { (estimationResult || (error && imageSrc)) && !isCameraOpen && !isCropping && renderEstimationResult()}
 
-       {/* User Profile Card */}
+        {/* Water Intake Card */}
         <Card>
             <CardHeader>
-                <CardTitle className="flex items-center gap-2"><User size={20}/> 您的個人資料</CardTitle>
-                <CardDescription>輸入您的資訊以估計每日卡路里需求。(資料儲存在您的瀏覽器中)</CardDescription>
+                <CardTitle className="flex items-center gap-2"><GlassWater size={20} /> 每日飲水追蹤</CardTitle>
+                <CardDescription>記錄您今天喝了多少水。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {waterStorageError && (
+                     <Alert variant="destructive">
+                         <AlertTitle>飲水記錄錯誤</AlertTitle>
+                         <AlertDescription>{waterStorageError.message}</AlertDescription>
+                     </Alert>
+                 )}
+                <div className="flex gap-2 items-end">
+                    <div className="flex-1 space-y-1">
+                        <Label htmlFor="waterAmount">新增飲水量 (毫升)</Label>
+                        <Input
+                            id="waterAmount"
+                            type="number"
+                            value={waterAmountToAdd}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === '' || (/^\d+$/.test(val) && parseInt(val) >= 0)) {
+                                    setWaterAmountToAdd(val);
+                                }
+                            }}
+                            placeholder="例如：250"
+                            min="0"
+                            step="50"
+                            inputMode="numeric"
+                            aria-label="輸入飲水量（毫升）"
+                        />
+                    </div>
+                    <Button onClick={addWater} disabled={!waterAmountToAdd || parseInt(waterAmountToAdd) <= 0}>
+                         <PlusCircle className="mr-2 h-4 w-4" /> 新增
+                    </Button>
+                </div>
+                <div className="space-y-2 pt-2">
+                    <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">今日已喝：</span>
+                        <span className="font-medium text-primary">{currentWaterIntake} 毫升</span>
+                    </div>
+                     {/* Recommended/Target Intake Display */}
+                     {userProfile.targetWaterIntake !== undefined || recommendedWater !== null ? (
+                         <>
+                             <Progress
+                                value={(currentWaterIntake / (userProfile.targetWaterIntake ?? recommendedWater ?? 1)) * 100}
+                                className="h-2"
+                                aria-label={`飲水進度 ${Math.round((currentWaterIntake / (userProfile.targetWaterIntake ?? recommendedWater ?? 1)) * 100)}%`}
+                            />
+                             <div className="flex justify-between items-center text-xs text-muted-foreground">
+                                <span>0 毫升</span>
+                                <span>
+                                    目標：{userProfile.targetWaterIntake ?? recommendedWater ?? 'N/A'} 毫升
+                                    {!userProfile.targetWaterIntake && recommendedWater && " (建議)"}
+                                </span>
+                             </div>
+                         </>
+                     ) : (
+                         <p className="text-xs text-muted-foreground text-center">輸入體重或設定目標以查看進度。</p>
+                     )}
+                </div>
+
+            </CardContent>
+        </Card>
+
+
+       {/* User Profile & Stats Card */}
+        <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2"><User size={20}/> 您的個人資料 & 統計</CardTitle>
+                <CardDescription>輸入您的資訊以估算每日需求。(資料儲存在您的瀏覽器中)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
                  {/* Display profile storage errors */}
@@ -1680,6 +1885,37 @@ export default function CalorieLogger() {
                             aria-label="輸入體重（公斤）"
                         />
                     </div>
+                     <div className="space-y-1">
+                        <Label htmlFor="age" className="flex items-center gap-1"><CalendarDays size={14}/> 年齡 (歲)</Label>
+                        <Input
+                            id="age"
+                            type="number"
+                            value={userProfile?.age ?? ''}
+                            onChange={(e) => handleProfileChange('age', e.target.value)}
+                            placeholder="例如：30"
+                            min="0"
+                            step="1"
+                            aria-label="輸入年齡（歲）"
+                        />
+                    </div>
+                     <div className="space-y-1">
+                         <Label htmlFor="gender" className="flex items-center gap-1"><PersonStanding size={14}/> 性別</Label>
+                        <Select
+                            value={userProfile?.gender || ''}
+                            onValueChange={(value) => handleProfileChange('gender', value as Gender | undefined)}
+                        >
+                            <SelectTrigger id="gender" aria-label="選取生理性別">
+                                <SelectValue placeholder={isClient ? "選取您的生理性別" : undefined}>
+                                  {userProfile?.gender ? genderTranslations[userProfile.gender] : (isClient ? "選取您的生理性別" : null)}
+                                </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                                {Object.entries(genderTranslations).map(([key, label]) => (
+                                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
                 </div>
                  <div className="space-y-1">
                     <Label htmlFor="activityLevel" className="flex items-center gap-1"><Activity size={14}/> 活動水平</Label>
@@ -1701,15 +1937,48 @@ export default function CalorieLogger() {
                         </SelectContent>
                     </Select>
                 </div>
-                 {/* Display Estimated Needs */}
+                 {/* Target Water Intake */}
+                 <div className="space-y-1">
+                    <Label htmlFor="targetWaterIntake" className="flex items-center gap-1"><Droplet size={14}/> 每日目標飲水量 (毫升)</Label>
+                    <Input
+                        id="targetWaterIntake"
+                        type="number"
+                        value={userProfile?.targetWaterIntake ?? ''}
+                        onChange={(e) => handleProfileChange('targetWaterIntake', e.target.value)}
+                        placeholder={`例如：${recommendedWater ?? 2000}`}
+                        min="0"
+                        step="100"
+                        aria-label="輸入每日目標飲水量（毫升）"
+                    />
+                    {recommendedWater && !userProfile.targetWaterIntake && (
+                        <p className="text-xs text-muted-foreground pt-1">根據您的體重，建議每日飲用約 {recommendedWater} 毫升。</p>
+                    )}
+                </div>
+
+                <Separator className="my-4"/>
+
+                {/* Display Calculated Stats */}
+                 <div className="grid grid-cols-2 gap-4 text-center">
+                     <div className="space-y-1 p-3 rounded-md border bg-muted/30">
+                         <p className="text-xs text-muted-foreground">BMI</p>
+                         <p className="text-2xl font-semibold text-foreground">{bodyMassIndex ?? '--'}</p>
+                         {/* Add BMI category indication if needed */}
+                     </div>
+                     <div className="space-y-1 p-3 rounded-md border bg-muted/30">
+                         <p className="text-xs text-muted-foreground">基礎代謝率 (BMR)</p>
+                         <p className="text-2xl font-semibold text-foreground">{basalMetabolicRate ?? '--'}</p>
+                         <p className="text-xs text-muted-foreground">大卡/日</p>
+                     </div>
+                 </div>
                 {estimatedDailyNeeds !== null && (
-                    <div className="pt-2 text-sm text-muted-foreground">
-                        估計每日卡路里需求: <strong className="text-primary">{estimatedDailyNeeds} 大卡</strong>
+                    <div className="pt-3 text-sm text-muted-foreground text-center border-t mt-4">
+                        估計每日總熱量消耗 (TDEE): <strong className="text-primary">{estimatedDailyNeeds} 大卡</strong>
                          <p className="text-xs">(此為粗略估計，僅供參考)</p>
                     </div>
                 )}
+
                  {/* Apple Health Integration Placeholder */}
-                 <Button variant="outline" disabled className="w-full mt-2">
+                 <Button variant="outline" disabled className="w-full mt-4">
                       {/* Placeholder - Apple Health integration requires native capabilities or specific APIs not available in standard web */}
                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 mr-2"><path d="M12.001 4.5a.75.75 0 01.75.75v1.502a.75.75 0 01-1.5 0V5.25a.75.75 0 01.75-.75zM12 9a.75.75 0 01.75.75v5.495a.75.75 0 01-1.5 0V9.75A.75.75 0 0112 9zm8.036 1.41l1.83 1.22-.001.001A11.95 11.95 0 0112 21.75c-2.672 0-5.153-.873-7.16-2.34l-.005-.003-1.83-1.22a.75.75 0 11.9-1.2l1.83 1.22a10.45 10.45 0 0012.46 0l1.83-1.22a.75.75 0 01.9 1.2zM12 2.25C6.34 2.25 1.75 6.84 1.75 12.5S6.34 22.75 12 22.75 22.25 18.16 22.25 12.5 17.66 2.25 12 2.25zm0 1.5a8.75 8.75 0 100 17.5 8.75 8.75 0 000-17.5z" clipRule="evenodd"></path></svg>
                      連接 Apple 健康 (開發中)
@@ -1724,11 +1993,13 @@ export default function CalorieLogger() {
       <div className="md:w-1/2 space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><BarChart3 size={20}/> 您的卡路里記錄</CardTitle>
+            <CardTitle className="flex items-center gap-2"><BarChart3 size={20}/> 您的記錄摘要</CardTitle>
              <CardDescription>
                 最近記錄的項目摘要。
-                {storageError && ( // Display log storage error here as well
-                     <span className="text-destructive ml-2">(錯誤：{storageError.message})</span>
+                {(storageError || waterStorageError) && ( // Display log storage errors here as well
+                     <span className="text-destructive ml-2">
+                         (儲存錯誤: {storageError?.message || waterStorageError?.message})
+                     </span>
                  )}
              </CardDescription>
 
@@ -1744,9 +2015,10 @@ export default function CalorieLogger() {
                      {[...Array(2)].map((_, index) => (
                         <Card key={index} className="p-4">
                             <Skeleton className="h-5 w-1/3 mb-3 rounded" /> {/* Date Skeleton */}
-                             <div className="flex justify-between mb-3">
-                                <Skeleton className="h-4 w-1/4 rounded" /> {/* Calories Skeleton */}
-                                <Skeleton className="h-4 w-1/4 rounded" /> {/* Amount Skeleton */}
+                             <div className="grid grid-cols-3 gap-2 mb-3"> {/* Grid for stats */}
+                                <Skeleton className="h-4 w-full rounded" /> {/* Calories Skeleton */}
+                                <Skeleton className="h-4 w-full rounded" /> {/* Amount Skeleton */}
+                                <Skeleton className="h-4 w-full rounded" /> {/* Water Skeleton */}
                              </div>
                              {/* Entry Skeletons */}
                              {[...Array(2)].map((_, entryIndex) => (
@@ -1768,7 +2040,7 @@ export default function CalorieLogger() {
                  <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4 pt-16"> {/* Added padding top */}
                     <UtensilsCrossed className="w-12 h-12 mb-4 opacity-50" />
                     <p className="text-lg font-medium">您的記錄是空的</p>
-                    <p>拍下食物照片開始記錄吧！</p>
+                    <p>拍下食物照片或記錄飲水開始吧！</p>
                 </div>
               ) : (
                 <Accordion type="single" collapsible className="w-full space-y-4" defaultValue="item-0"> {/* Default open first item */}
@@ -1789,29 +2061,38 @@ export default function CalorieLogger() {
                            <AccordionItem key={summary.date} value={`item-${index}`}>
                              <Card className="overflow-hidden"> {/* Apply overflow hidden to card */}
                                 <AccordionTrigger className="px-4 py-3 hover:no-underline bg-muted/50">
-                                  <div className="flex justify-between items-center w-full">
-                                    <span className="font-semibold text-base">
+                                  <div className="flex justify-between items-center w-full gap-4"> {/* Added gap */}
+                                    <span className="font-semibold text-base whitespace-nowrap"> {/* Prevent date wrapping */}
                                       {summaryDate ? format(summaryDate, 'yyyy年MM月dd日') : '無效日期'} {/* Format date safely */}
                                     </span>
-                                    <div className="text-sm text-right">
-                                      <p className="text-primary">
+                                    {/* Grid for daily totals */}
+                                    <div className="grid grid-cols-3 gap-2 text-xs sm:text-sm text-right flex-shrink-0">
+                                      <p className="text-primary whitespace-nowrap">
                                           {/* Safely display total calories */}
                                          {typeof summary.totalCalories === 'number' && !isNaN(summary.totalCalories) ? summary.totalCalories.toFixed(0) : '??'} 大卡
                                       </p>
-                                      {summary.totalAmount > 0 && typeof summary.totalAmount === 'number' && !isNaN(summary.totalAmount) && (
-                                          <p className="text-muted-foreground">{summary.totalAmount.toFixed(2)} 元</p>
-                                      )}
+                                      {summary.totalAmount > 0 && typeof summary.totalAmount === 'number' && !isNaN(summary.totalAmount) ? (
+                                          <p className="text-muted-foreground whitespace-nowrap">{summary.totalAmount.toFixed(2)} 元</p>
+                                      ) : ( <span />) /* Placeholder for grid alignment */ }
+                                       <p className="text-blue-600 whitespace-nowrap">
+                                           <Droplet size={12} className="inline mr-0.5"/>
+                                          {typeof summary.totalWaterIntake === 'number' && !isNaN(summary.totalWaterIntake) ? summary.totalWaterIntake : 0} 毫升
+                                       </p>
                                     </div>
                                   </div>
                                 </AccordionTrigger>
                                 <AccordionContent className="border-t border-border max-h-[50vh] overflow-y-auto"> {/* Add max-height and overflow */}
-                                  <div className="p-2 sm:p-4 divide-y divide-border"> {/* Adjust padding and add dividers */}
-                                    {summary.entries.map((entry) => (
-                                        <React.Fragment key={entry.id}>
-                                           {renderLogEntry(entry)}
-                                        </React.Fragment>
-                                    ))}
-                                  </div>
+                                   {summary.entries.length > 0 ? (
+                                      <div className="p-2 sm:p-4 divide-y divide-border"> {/* Adjust padding and add dividers */}
+                                        {summary.entries.map((entry) => (
+                                            <React.Fragment key={entry.id}>
+                                               {renderLogEntry(entry)}
+                                            </React.Fragment>
+                                        ))}
+                                      </div>
+                                   ) : (
+                                       <p className="p-4 text-sm text-muted-foreground text-center">本日無食物記錄。</p>
+                                   )}
                                 </AccordionContent>
                              </Card>
                            </AccordionItem>
