@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
@@ -21,6 +22,7 @@ import ReactCrop, { type Crop as CropType, centerCrop, makeAspectCrop, PixelCrop
 import 'react-image-crop/dist/ReactCrop.css'; // Import css styles for react-image-crop
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for placeholder
 import { format, startOfDay, parseISO, isValid, isDate } from 'date-fns'; // Import date-fns functions, add isValid, isDate
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"; // Import Alert
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -243,6 +245,7 @@ export default function CalorieLogger() {
   const [loadingMessage, setLoadingMessage] = useState<string>(''); // For specific loading messages
   const [error, setError] = useState<string | null>(null);
   // Use the storage-specific type for localStorage
+  // Destructure error from the hook
   const [calorieLog, setCalorieLog, storageError] = useLocalStorage<LogEntryStorage[]>('calorieLog', []);
   const [userProfile, setUserProfile, profileStorageError] = useLocalStorage<UserProfile>('userProfile', {});
   const [dailySummaries, setDailySummaries] = useState<DailySummary[]>([]); // State for daily summaries
@@ -1066,16 +1069,11 @@ export default function CalorieLogger() {
              return prev;
         }
 
-        // Only update if the value has actually changed
-        if (newProfile[field] !== processedValue) {
-            newProfile[field] = processedValue;
-            // The setUserProfile hook now handles try-catch internally and sets profileStorageError
-             return newProfile; // Return the updated profile for the hook to process
-        }
-
-        return prev; // Return previous state if no change
+        // Update the profile object directly - this might be causing the issue if setUserProfile triggers re-renders
+        newProfile[field] = processedValue;
+        return newProfile; // Return the updated profile for the hook to process
     });
- }, [setUserProfile]); // Add setUserProfile to dependency array
+ }, [setUserProfile]); // Dependency array should include setUserProfile from the hook
 
 
   const estimatedDailyNeeds = useMemo(() => calculateEstimatedNeeds(userProfile), [userProfile]);
@@ -1627,6 +1625,14 @@ export default function CalorieLogger() {
                 <CardDescription>輸入您的資訊以估計每日卡路里需求。(資料儲存在您的瀏覽器中)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+                 {/* Display profile storage errors */}
+                {profileStorageError && (
+                     <Alert variant="destructive">
+                         <AlertTitle>個人資料儲存錯誤</AlertTitle>
+                         <AlertDescription>{profileStorageError.message}</AlertDescription>
+                     </Alert>
+                 )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
                         <Label htmlFor="height" className="flex items-center gap-1"><Ruler size={14}/> 身高 (公分)</Label>
@@ -1657,7 +1663,8 @@ export default function CalorieLogger() {
                  <div className="space-y-1">
                     <Label htmlFor="activityLevel" className="flex items-center gap-1"><Activity size={14}/> 活動水平</Label>
                     <Select
-                        value={userProfile.activityLevel}
+                         // Ensure Select has a default empty string value if profile is undefined
+                        value={userProfile.activityLevel || ''}
                         onValueChange={(value) => handleProfileChange('activityLevel', value as ActivityLevel | undefined)}
                     >
                         <SelectTrigger id="activityLevel" aria-label="選取活動水平">
@@ -1694,7 +1701,13 @@ export default function CalorieLogger() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><BarChart3 size={20}/> 您的卡路里記錄</CardTitle>
-            <CardDescription>最近記錄的項目摘要。</CardDescription>
+             <CardDescription>
+                最近記錄的項目摘要。
+                {storageError && ( // Display log storage error here as well
+                     <span className="text-destructive ml-2">(錯誤：{storageError.message})</span>
+                 )}
+             </CardDescription>
+
           </CardHeader>
           <CardContent>
             {/* Adjust height based on viewport, ensure scrollbar visible */}
