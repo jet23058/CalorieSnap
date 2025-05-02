@@ -194,9 +194,15 @@ export default function CalorieLogger() {
   const [completedCrop, setCompletedCrop] = useState<Crop>();
   const imgRef = useRef<HTMLImageElement>(null);
   const [aspect, setAspect] = useState<number | undefined>(undefined); // Aspect ratio for crop - undefined for free crop
+  const [isClient, setIsClient] = useState(false); // State for client-side rendering check
 
 
   const { toast } = useToast();
+
+  useEffect(() => {
+    setIsClient(true); // Set client to true once component mounts
+  }, []);
+
 
   const fetchCurrentLocation = useCallback(() => {
       if (typeof window === 'undefined' || !navigator.geolocation) {
@@ -243,8 +249,10 @@ export default function CalorieLogger() {
 
   // Fetch location on initial client mount
   useEffect(() => {
-      fetchCurrentLocation();
-  }, [fetchCurrentLocation]);
+      if (isClient) {
+          fetchCurrentLocation();
+      }
+  }, [fetchCurrentLocation, isClient]); // Depend on isClient
 
 
   useEffect(() => {
@@ -281,8 +289,10 @@ export default function CalorieLogger() {
               }
           }
       };
+      if (isClient) {
+         getCameraPermission();
+      }
 
-      getCameraPermission();
 
       // Cleanup function to stop video stream when component unmounts
       return () => {
@@ -297,7 +307,7 @@ export default function CalorieLogger() {
               }
           }
       };
-  }, [toast]);
+  }, [toast, isClient]); // Depend on isClient
 
 
   // --- Crop Logic ---
@@ -789,7 +799,7 @@ export default function CalorieLogger() {
       }
   };
 
-  const todayWaterIntake = waterLog[getCurrentDate()] || 0;
+  const todayWaterIntake = isClient ? (waterLog[getCurrentDate()] || 0) : 0; // Guard access
   const waterProgress = recommendedWater ? Math.min((todayWaterIntake / (recommendedWater || 2000)) * 100, 100) : 0; // Use default target if recommended is null
   const defaultWaterTarget = 2000; // Default target if profile is incomplete
 
@@ -961,14 +971,11 @@ export default function CalorieLogger() {
 
 
  const renderLogList = () => {
-    const [isClient, setIsClient] = useState(false);
 
-    useEffect(() => {
-      setIsClient(true);
-    }, []);
 
      // Check for localStorage errors and display a persistent warning if needed
      const renderStorageError = () => {
+        if (!isClient) return null; // Only render errors on client
         const errorMessages = [
             logError,
             profileError,
@@ -1081,16 +1088,16 @@ export default function CalorieLogger() {
                 今日已喝： {todayWaterIntake} / {recommendedWater || defaultWaterTarget} 毫升 ({Math.round(waterProgress)}%)
             </div>
             <div className="flex justify-center gap-2 flex-wrap">
-                <Button onClick={() => addWater(250)} variant="outline" size="sm">
+                <Button onClick={() => addWater(250)} variant="outline" size="sm" disabled={!isClient}>
                     <Plus className="mr-1 h-4 w-4" /> 250ml (一杯)
                 </Button>
-                <Button onClick={() => addWater(500)} variant="outline" size="sm">
+                <Button onClick={() => addWater(500)} variant="outline" size="sm" disabled={!isClient}>
                     <Plus className="mr-1 h-4 w-4" /> 500ml (一瓶)
                 </Button>
-                 <Button onClick={() => addWater(-250)} variant="outline" size="sm" disabled={todayWaterIntake <= 0}>
+                 <Button onClick={() => addWater(-250)} variant="outline" size="sm" disabled={!isClient || todayWaterIntake <= 0}>
                      <Trash2 className="mr-1 h-4 w-4" /> 移除 250ml
                  </Button>
-                <Button onClick={resetWater} variant="destructive" size="sm">
+                <Button onClick={resetWater} variant="destructive" size="sm" disabled={!isClient}>
                     <RotateCw className="mr-1 h-4 w-4" /> 重設今日
                 </Button>
             </div>
@@ -1110,7 +1117,7 @@ export default function CalorieLogger() {
             <CardDescription>根據您的個人資料計算的健康指標。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-             {profileError && (
+             {profileError && isClient && ( // Only show profile error on client
                  <Alert variant="destructive" className="mb-4">
                      <Info className="h-4 w-4" />
                      <AlertTitle>設定檔儲存錯誤</AlertTitle>
@@ -1151,7 +1158,7 @@ export default function CalorieLogger() {
              </div>
               {/* Apple Health Integration Button */}
               <div className="pt-4">
-                  <Button variant="outline" className="w-full" onClick={() => toast({ title: '尚未實作', description: 'Apple 健康整合即將推出！' })}>
+                  <Button variant="outline" className="w-full" onClick={() => toast({ title: '尚未實作', description: 'Apple 健康整合即將推出！' })} disabled={!isClient}>
                        <Apple className="mr-2 h-4 w-4" /> 連接 Apple 健康
                   </Button>
               </div>
@@ -1364,7 +1371,7 @@ export default function CalorieLogger() {
               <CardDescription>更新您的個人資訊以取得更準確的計算。</CardDescription>
          </CardHeader>
          <CardContent className="space-y-4">
-               {profileError && (
+               {profileError && isClient && ( // Only show error on client
                  <Alert variant="destructive" className="mb-4">
                      <Info className="h-4 w-4" />
                      <AlertTitle>設定檔儲存錯誤</AlertTitle>
@@ -1382,6 +1389,7 @@ export default function CalorieLogger() {
                          value={userProfile.age === null ? '' : userProfile.age}
                          onChange={(e) => handleProfileChange('age', e.target.value)}
                          min="1" // Minimum age 1
+                         disabled={!isClient} // Disable on server
                      />
                  </div>
                  {/* Gender */}
@@ -1390,6 +1398,7 @@ export default function CalorieLogger() {
                       <Select
                          value={userProfile.gender || ''}
                          onValueChange={(value) => handleProfileChange('gender', value)}
+                         disabled={!isClient} // Disable on server
                       >
                          <SelectTrigger id="gender" aria-label="選取生理性別">
                              <SelectValue placeholder="選取生理性別" />
@@ -1412,6 +1421,7 @@ export default function CalorieLogger() {
                          value={userProfile.height === null ? '' : userProfile.height}
                          onChange={(e) => handleProfileChange('height', e.target.value)}
                           min="1" // Minimum height 1cm
+                          disabled={!isClient} // Disable on server
                      />
                  </div>
                   {/* Weight */}
@@ -1425,6 +1435,7 @@ export default function CalorieLogger() {
                          onChange={(e) => handleProfileChange('weight', e.target.value)}
                          min="1" // Minimum weight 1kg
                          step="0.1" // Allow decimal for weight
+                         disabled={!isClient} // Disable on server
                      />
                  </div>
                  {/* Activity Level */}
@@ -1433,6 +1444,7 @@ export default function CalorieLogger() {
                      <Select
                          value={userProfile.activityLevel || ''}
                          onValueChange={(value) => handleProfileChange('activityLevel', value)}
+                         disabled={!isClient} // Disable on server
                      >
                          <SelectTrigger id="activityLevel" aria-label="選取活動水平">
                              <SelectValue placeholder="選取您的活動水平" />
@@ -1458,7 +1470,7 @@ export default function CalorieLogger() {
  const renderNotificationSettingsTrigger = () => (
      <Sheet>
          <SheetTrigger asChild>
-             <Button variant="outline" className="w-full mt-6">
+             <Button variant="outline" className="w-full mt-6" disabled={!isClient}>
                  <Bell className="mr-2 h-4 w-4" /> 開啟飲水通知設定
              </Button>
          </SheetTrigger>
@@ -1493,7 +1505,7 @@ export default function CalorieLogger() {
             <TabsContent value="logging" className="pt-4">
                  <Card className="mb-6 shadow-md">
                     <CardHeader>
-                        <CardTitle className="flex items-center gap-2"><Camera size={24} /> 拍攝或上傳食物照片</CardTitle>
+                        <CardTitle className="flex items-center gap-2"><Camera size={24} /> 點擊選擇上傳影像或拍攝照片</CardTitle>
                         <CardDescription>使用您的相機拍攝食物照片，或從您的裝置上傳影像。</CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -1530,10 +1542,10 @@ export default function CalorieLogger() {
 
                         {/* Capture/Upload Buttons */}
                         <div className="flex flex-col sm:flex-row gap-2">
-                             <Button onClick={captureImage} disabled={hasCameraPermission !== true || isLoading} className="flex-1">
+                             <Button onClick={captureImage} disabled={!isClient || hasCameraPermission !== true || isLoading} className="flex-1">
                                  <Camera className="mr-2 h-4 w-4" /> 拍攝照片
                              </Button>
-                            <Button onClick={() => fileInputRef.current?.click()} disabled={isLoading} variant="outline" className="flex-1">
+                            <Button onClick={() => fileInputRef.current?.click()} disabled={!isClient || isLoading} variant="outline" className="flex-1">
                                 <UploadCloud className="mr-2 h-4 w-4" /> 上傳影像
                             </Button>
                             <Input
@@ -1553,7 +1565,7 @@ export default function CalorieLogger() {
                                 <span>正在估算卡路里...</span>
                             </div>
                         )}
-                         {error && (
+                         {error && isClient && ( // Only show error on client
                            <Alert variant="destructive" className="mt-4">
                              <AlertTitle>錯誤</AlertTitle>
                              <AlertDescription>{error}</AlertDescription>
@@ -1562,8 +1574,8 @@ export default function CalorieLogger() {
                     </CardContent>
                 </Card>
 
-                 {/* Estimation Result (only show if imageSrc exists and not cropping) */}
-                 {imageSrc && !isCropping && renderEstimationResult()}
+                 {/* Estimation Result (only show if imageSrc exists and not cropping, and on client) */}
+                 {isClient && imageSrc && !isCropping && renderEstimationResult()}
 
                  {/* Calorie Log Summary */}
                 {renderLogList()}
