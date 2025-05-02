@@ -98,14 +98,16 @@ export default function CalorieLogger() {
             description: "已設定目前位置。",
         });
       },
-      (error) => {
-        console.error("取得地點時發生錯誤:", error);
+      (geoError) => {
+        // Log specific error details
+        console.error("取得地點時發生錯誤:", geoError.message || 'No message', 'Code:', geoError.code || 'No code', geoError);
+
         let description = "無法取得您的地點。";
-        if (error.code === error.PERMISSION_DENIED) {
+        if (geoError.code === geoError.PERMISSION_DENIED) {
             description = "地點權限遭拒。請在瀏覽器設定中啟用。";
-        } else if (error.code === error.POSITION_UNAVAILABLE) {
+        } else if (geoError.code === geoError.POSITION_UNAVAILABLE) {
             description = "無法取得地點資訊。";
-        } else if (error.code === error.TIMEOUT) {
+        } else if (geoError.code === geoError.TIMEOUT) {
             description = "取得使用者地點的要求已逾時。";
         }
         setLocation(''); // Clear placeholder on error
@@ -144,22 +146,53 @@ export default function CalorieLogger() {
     setImageSrc(null);
     clearEstimation();
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      // Prefer environment camera, fallback to default
+      const constraints: MediaStreamConstraints = {
+        video: { facingMode: { ideal: 'environment' } }
+      };
+      let mediaStream: MediaStream;
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        console.warn("Environment camera failed, trying default:", err);
+        // Fallback to default camera if environment fails
+        mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
+
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        // Ensure video plays inline on iOS
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.play().catch(playError => {
+            console.error("Video play failed:", playError);
+             toast({
+                title: "相機預覽錯誤",
+                description: "無法啟動相機預覽。",
+                variant: "destructive",
+            });
+        });
       }
       setIsCameraOpen(true);
     } catch (err) {
       console.error("存取相機時發生錯誤:", err);
-      setError("無法存取相機。請檢查權限。");
+       let errorMsg = "無法存取相機。請檢查權限。";
+       if (err instanceof Error && err.name === 'NotAllowedError') {
+         errorMsg = "相機權限遭拒。請在瀏覽器設定中啟用。";
+       } else if (err instanceof Error && err.name === 'NotFoundError') {
+            errorMsg = "找不到相機裝置。";
+       } else if (err instanceof Error && err.name === 'NotReadableError') {
+           errorMsg = "相機目前正由其他應用程式使用中，或發生硬體錯誤。";
+       }
+      setError(errorMsg);
       toast({
         title: "相機錯誤",
-        description: "無法存取相機。請確保已授予權限。",
+        description: errorMsg,
         variant: "destructive",
       });
     }
   };
+
 
   const closeCamera = () => {
     if (stream) {
@@ -173,31 +206,73 @@ export default function CalorieLogger() {
   };
 
  const takePicture = () => {
-    if (videoRef.current && canvasRef.current) {
+    if (videoRef.current && canvasRef.current && videoRef.current.readyState >= videoRef.current.HAVE_CURRENT_DATA) { // Check readyState
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+
+      // Match canvas dimensions to video's actual dimensions
+       const videoWidth = video.videoWidth;
+       const videoHeight = video.videoHeight;
+
+       if (videoWidth === 0 || videoHeight === 0) {
+          console.error("Video dimensions are zero, cannot take picture yet.");
+           toast({ title: "拍攝錯誤", description: "相機畫面尚未就緒。", variant: "destructive" });
+           return; // Exit if dimensions aren't ready
+       }
+
+
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
       const context = canvas.getContext('2d');
       if (context) {
-        // Consider resizing/compressing image here (Future enhancement)
-        // Example: context.drawImage(video, 0, 0, desiredWidth, desiredHeight);
-        // const dataUri = canvas.toDataURL('image/jpeg', 0.8); // Quality adjustment
+         // Draw the current video frame onto the canvas
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUri = canvas.toDataURL('image/jpeg');
+
+        // Get the image data from the canvas (consider quality/format)
+        let dataUri: string;
+        try {
+           // Use jpeg for potentially smaller size, adjust quality (0.8 = 80%)
+           dataUri = canvas.toDataURL('image/jpeg', 0.85);
+            // Optional: Fallback to png if jpeg fails? unlikely but possible
+             if (!dataUri || dataUri === 'data:,') {
+                console.warn("toDataURL('image/jpeg') failed, falling back to png.");
+                dataUri = canvas.toDataURL('image/png');
+            }
+        } catch (e) {
+             console.error("Error creating data URL from canvas:", e);
+             toast({ title: "拍攝錯誤", description: "無法處理拍攝的影像。", variant: "destructive" });
+             return; // Exit if data URL creation fails
+        }
+
+
+         if (!dataUri || dataUri === 'data:,') {
+             console.error("Failed to get data URI from canvas.");
+             toast({ title: "拍攝錯誤", description: "無法從相機擷取有效的影像。", variant: "destructive" });
+             return; // Exit if data URL is invalid
+         }
+
+
+        // Successfully captured image
         setImageSrc(dataUri);
-        clearEstimation();
-        closeCamera();
-        estimateCalories(dataUri);
+        clearEstimation(); // Clear previous results
+        closeCamera(); // Close camera after taking picture
+        estimateCalories(dataUri); // Start estimation
       } else {
           setError("無法取得畫布內容。");
           toast({ title: "拍攝錯誤", description: "無法從相機拍攝影像。", variant: "destructive" });
+          closeCamera(); // Close camera even on error
       }
     } else {
-        setError("相機或畫布尚未就緒。");
-        toast({ title: "拍攝錯誤", description: "相機畫面無法使用。", variant: "destructive" });
+        let errorMsg = "相機或畫布尚未就緒。";
+        if (videoRef.current && videoRef.current.readyState < videoRef.current.HAVE_CURRENT_DATA) {
+           errorMsg = "相機畫面仍在載入中。";
+        }
+        setError(errorMsg);
+        toast({ title: "拍攝錯誤", description: errorMsg, variant: "destructive" });
+        closeCamera(); // Close camera even on error
     }
   };
+
 
   const clearEstimation = () => {
      setEstimationResult(null);
@@ -214,11 +289,19 @@ export default function CalorieLogger() {
     setEstimationResult(null);
 
     try {
-      // Add check for data URI length before sending? (Future enhancement)
-      if (photoDataUri.length > 4 * 1024 * 1024) { // Example: Check if > ~4MB
-          console.warn("影像資料 URI 可能過大。");
-          // Potentially resize/compress before sending to AI
-      }
+      // Basic size check (approx 4MB limit typical for Gemini)
+      const sizeInMB = (photoDataUri.length * (3/4)) / (1024 * 1024); // Base64 approx size
+       if (sizeInMB > 3.8) { // Slightly below 4MB limit
+            console.warn(`影像大小 (${sizeInMB.toFixed(2)}MB) 可能接近或超過限制。`);
+             toast({
+                title: "影像過大",
+                description: "影像檔案大小可能過大，可能會導致估計失敗或緩慢。建議使用較小的圖片。",
+                variant: "default", // Warning, not destructive
+                duration: 6000,
+            });
+            // Future: Add client-side resizing here before sending
+       }
+
 
       const result = await estimateCalorieCount({ photoDataUri });
 
@@ -239,9 +322,11 @@ export default function CalorieLogger() {
       console.error("估計卡路里時發生錯誤:", err);
       let errorMsg = "無法估計卡路里。請再試一次。";
       if (err instanceof Error) {
-        // Check for specific known error types if possible
-         if (err.message.includes("quota") || err.message.includes("size")) {
-            errorMsg = "無法估計卡路里。影像可能太大或發生網路問題。";
+         // Check for specific known error types if possible
+         if (err.message.includes("quota") || err.message.includes("size") || err.message.includes("payload")) {
+            errorMsg = "無法估計卡路里。影像可能太大、無效，或發生網路問題。";
+         } else if (err.message.includes("API key")) {
+             errorMsg = "無法估計卡路里。API 設定錯誤。";
          } else {
              errorMsg = `無法估計卡路里: ${err.message}`;
          }
@@ -259,7 +344,7 @@ export default function CalorieLogger() {
 
   const logCalories = () => {
     // No longer need imageSrc check here as it's not stored
-    if (estimationResult && editedFoodItem) { // Ensure editedFoodItem is not empty
+    if (estimationResult && editedFoodItem && editedFoodItem.trim()) { // Ensure editedFoodItem is not empty or just whitespace
       const parsedAmount = parseFloat(amount);
       // Create entry based on the storage interface (no imageUrl)
       const newLogEntry: LogEntryStorage = {
@@ -267,7 +352,7 @@ export default function CalorieLogger() {
         calorieEstimate: estimationResult.calorieEstimate,
         confidence: estimationResult.confidence,
         // Do not include the original `foodItem` from estimationResult if using editedFoodItem
-        foodItem: editedFoodItem, // Use the edited name
+        foodItem: editedFoodItem.trim(), // Use the trimmed edited name
         id: Date.now().toString(),
         timestamp: Date.now(),
         // imageUrl: imageSrc, // DO NOT STORE IMAGE URL
@@ -288,45 +373,47 @@ export default function CalorieLogger() {
           clearEstimation();
           toast({
               title: "記錄成功",
-              description: `${editedFoodItem} (${estimationResult.calorieEstimate} 大卡) 已新增至您的記錄中。`,
+              description: `${newLogEntry.foodItem} (${estimationResult.calorieEstimate} 大卡) 已新增至您的記錄中。`,
           });
       } catch (e) {
            console.error("儲存至 localStorage 時發生錯誤:", e);
 
            // Check if it's our custom LocalStorageError related to quota
-           if (e instanceof LocalStorageError && e.message.includes('quota exceeded')) {
+           if (e instanceof LocalStorageError && (e.message.includes('quota exceeded') || e.message.includes('Failed to execute \'setItem\''))) {
                  toast({
                     title: "記錄錯誤",
-                    description: "無法儲存此項目。儲存空間可能已滿。",
+                    description: "無法儲存此項目。瀏覽器儲存空間可能已滿。請嘗試清除部分記錄。",
                     variant: "destructive",
+                     duration: 7000,
                 });
-               // Optionally: Attempt to clear older entries if quota is exceeded
-                console.warn("LocalStorage 配額已滿。嘗試清除較舊的項目...");
-                 try {
-                     const MAX_LOG_ENTRIES = 100;
-                     const trimmedLog = calorieLog.slice(0, Math.floor(MAX_LOG_ENTRIES * 0.8)); // Keep 80%
-                     setCalorieLog([newLogEntry, ...trimmedLog].slice(0, MAX_LOG_ENTRIES)); // Retry adding the new entry
-                      toast({
-                          title: "記錄成功 (已清除儲存空間)",
-                          description: `已清除較舊的項目以騰出空間。已新增 ${editedFoodItem}。`,
-                          variant: 'default',
-                          duration: 6000,
-                      });
-                      setImageSrc(null);
-                      clearEstimation();
-                 } catch (finalError) {
-                     console.error("即使清除後仍無法儲存:", finalError);
-                     toast({
-                         title: "記錄錯誤",
-                         description: "即使清除空間後仍無法儲存項目。請手動清除部分記錄。",
-                         variant: "destructive",
-                     });
-                 }
+               // Optionally: Attempt to clear older entries if quota is exceeded - Be cautious with automatic deletion
+                // console.warn("LocalStorage 配額已滿。嘗試清除較舊的項目...");
+                // try {
+                //     const MAX_LOG_ENTRIES = 100;
+                //     const trimmedLog = calorieLog.slice(0, Math.floor(MAX_LOG_ENTRIES * 0.8)); // Keep 80%
+                //     setCalorieLog([newLogEntry, ...trimmedLog].slice(0, MAX_LOG_ENTRIES)); // Retry adding the new entry
+                //       toast({
+                //           title: "記錄成功 (已清除儲存空間)",
+                //           description: `已清除較舊的項目以騰出空間。已新增 ${newLogEntry.foodItem}。`,
+                //           variant: 'default',
+                //           duration: 6000,
+                //       });
+                //       setImageSrc(null);
+                //       clearEstimation();
+                // } catch (finalError) {
+                //     console.error("即使清除後仍無法儲存:", finalError);
+                //     // Restore original state maybe?
+                //      toast({
+                //          title: "記錄錯誤",
+                //          description: "即使清除空間後仍無法儲存項目。請手動清除部分記錄。",
+                //          variant: "destructive",
+                //      });
+                // }
            } else {
                // Handle other potential errors during setCalorieLog or JSON stringify
                 toast({
                     title: "記錄錯誤",
-                    description: "儲存項目時發生未預期的錯誤。",
+                    description: `儲存項目時發生未預期的錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`,
                     variant: "destructive",
                 });
            }
@@ -335,31 +422,45 @@ export default function CalorieLogger() {
     } else {
          toast({
             title: "記錄錯誤",
-            description: !editedFoodItem ? "食物品項名稱不可為空。" : "沒有可記錄的估計結果。",
+            description: !editedFoodItem || !editedFoodItem.trim() ? "食物品項名稱不可為空。" : "沒有可記錄的估計結果。",
             variant: "destructive",
          });
     }
   };
 
+
   const deleteLogEntry = (id: string) => {
-    setCalorieLog(calorieLog.filter(entry => entry.id !== id));
-     toast({
-        title: "記錄項目已刪除",
-        description: "所選項目已從您的記錄中移除。",
-      });
-  };
+    try {
+        setCalorieLog(calorieLog.filter(entry => entry.id !== id));
+        toast({
+            title: "記錄項目已刪除",
+            description: "所選項目已從您的記錄中移除。",
+        });
+    } catch (e) {
+        console.error("刪除記錄項目時發生錯誤:", e);
+        toast({
+            title: "刪除錯誤",
+            description: `移除項目時發生錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`,
+            variant: "destructive",
+        });
+    }
+};
+
 
   const triggerFileInput = () => {
+     // Clear previous image src if user clicks upload again
+     // setImageSrc(null); // Optional: Decide if you want to clear preview immediately
+     // clearEstimation(); // Optional: Clear results too?
     fileInputRef.current?.click();
   };
 
   // Helper to render meal icon
   const renderMealIcon = (mealType?: MealType) => {
     switch (mealType) {
-      case 'Breakfast': return <Coffee className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
-      case 'Lunch': return <Sun className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
-      case 'Dinner': return <Moon className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
-      case 'Snack': return <Apple className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
+      case 'Breakfast': return <Coffee className="h-4 w-4 inline-block mr-1 text-muted-foreground" aria-label="早餐"/>;
+      case 'Lunch': return <Sun className="h-4 w-4 inline-block mr-1 text-muted-foreground" aria-label="午餐"/>;
+      case 'Dinner': return <Moon className="h-4 w-4 inline-block mr-1 text-muted-foreground" aria-label="晚餐"/>;
+      case 'Snack': return <Apple className="h-4 w-4 inline-block mr-1 text-muted-foreground" aria-label="點心"/>;
       default: return null;
     }
   };
@@ -378,13 +479,14 @@ export default function CalorieLogger() {
       return (
          <Card className="border-destructive bg-destructive/10">
              <CardHeader>
-                 <CardTitle className="text-destructive">估計錯誤</CardTitle>
+                 <CardTitle className="text-destructive flex items-center gap-2"><X size={20}/> 估計錯誤</CardTitle> {/* Add icon */}
              </CardHeader>
              <CardContent>
                 <p className="text-destructive-foreground">{error}</p> {/* Ensure text is readable */}
              </CardContent>
              <CardFooter>
-                 <Button variant="destructive" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button>
+                  {/* Make dismiss button more prominent */}
+                 <Button variant="ghost" className="text-destructive-foreground underline" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button>
              </CardFooter>
          </Card>
       );
@@ -400,27 +502,45 @@ export default function CalorieLogger() {
           <CardContent className="space-y-4">
             {/* Preview Image (optional, not stored) */}
             {imageSrc && (
-                <div className="relative aspect-video w-full overflow-hidden rounded-md border mb-4">
-                  <Image src={imageSrc} alt="食物品項預覽" layout="fill" objectFit="contain" data-ai-hint="食物 盤子"/>
+                 // Use aspect-video for consistent ratio, contain ensures full image visible
+                <div className="relative aspect-video w-full overflow-hidden rounded-md border mb-4 bg-muted/30">
+                  <Image
+                    src={imageSrc}
+                    alt="食物品項預覽"
+                    layout="fill"
+                    objectFit="contain" // Changed from cover to contain
+                    data-ai-hint="食物 盤子"
+                    className="rounded-md" // Ensure image itself doesn't overflow container border
+                  />
                 </div>
             )}
 
+
             {/* Editable Food Item */}
             <div className="space-y-1">
-                <Label htmlFor="foodItem">食物品項</Label>
+                <Label htmlFor="foodItem">食物品項 <span className="text-destructive">*</span></Label> {/* Indicate required */}
                 <Input
                     id="foodItem"
                     value={editedFoodItem}
                     onChange={(e) => setEditedFoodItem(e.target.value)}
                     placeholder="例如：雞肉沙拉"
+                    aria-required="true" // ARIA for required
                 />
             </div>
 
             {/* Read-only Calorie Estimate & Confidence */}
-             <div className="flex justify-between text-sm">
+             <div className="flex justify-between text-sm pt-2">
                 <p><strong className="font-medium">估計卡路里：</strong> {estimationResult.calorieEstimate} 大卡</p>
-                <p><strong className="font-medium">信賴度：</strong> {Math.round(estimationResult.confidence * 100)}%</p>
+                 {/* Conditional rendering for confidence */}
+                <p className={estimationResult.confidence < 0.7 ? 'text-orange-600' : ''}>
+                    <strong className="font-medium">信賴度：</strong>
+                    {Math.round(estimationResult.confidence * 100)}%
+                     {estimationResult.confidence < 0.5 && <span className="ml-1 text-xs">(低)</span>}
+                </p>
+
             </div>
+
+             <Separator className="my-3"/> {/* Separator for clarity */}
 
             {/* Location */}
             <div className="space-y-1">
@@ -430,15 +550,17 @@ export default function CalorieLogger() {
                         id="location"
                         value={location}
                         onChange={(e) => setLocation(e.target.value)}
-                        placeholder="例如：家裡、辦公室咖啡廳"
+                        placeholder="例如：家裡、辦公室"
                         disabled={isFetchingLocation}
+                         aria-label="輸入地點"
                     />
                     <Button
                         variant="outline"
                         size="icon"
                         onClick={fetchCurrentLocation}
                         disabled={isFetchingLocation}
-                        title="取得目前位置"
+                        aria-label={isFetchingLocation ? "正在取得目前位置" : "取得目前位置"} // Dynamic label
+                        title={isFetchingLocation ? "正在取得..." : "取得目前位置"}
                         >
                         {isFetchingLocation ? <LoadingSpinner size={16}/> : <LocateFixed className="h-4 w-4" />}
                     </Button>
@@ -446,13 +568,14 @@ export default function CalorieLogger() {
             </div>
 
             {/* Meal Type */}
-             <div className="space-y-1">
-                <Label>餐點類型</Label>
-                 <RadioGroup value={mealType} onValueChange={(value) => setMealType(value as MealType)} className="flex flex-wrap gap-4 pt-2">
+             <div className="space-y-1 pt-2"> {/* Add padding top */}
+                <Label>餐點類型 (選填)</Label>
+                 {/* Use grid for better layout on smaller screens */}
+                 <RadioGroup value={mealType} onValueChange={(value) => setMealType(value as MealType)} className="grid grid-cols-2 gap-x-4 gap-y-2 pt-2 sm:grid-cols-4">
                     {(['Breakfast', 'Lunch', 'Dinner', 'Snack'] as MealType[]).map((type) => (
                     <div key={type} className="flex items-center space-x-2">
                         <RadioGroupItem value={type} id={`meal-${type}`} />
-                        <Label htmlFor={`meal-${type}`} className="font-normal cursor-pointer">
+                        <Label htmlFor={`meal-${type}`} className="font-normal cursor-pointer flex items-center gap-1.5"> {/* Gap for icon */}
                             {renderMealIcon(type)} {mealTypeTranslations[type]} {/* Use translated text */}
                         </Label>
                     </div>
@@ -461,25 +584,46 @@ export default function CalorieLogger() {
             </div>
 
             {/* Amount/Cost */}
-            <div className="space-y-1">
+            <div className="space-y-1 pt-2"> {/* Add padding top */}
                 <Label htmlFor="amount">金額 / 費用 (選填)</Label>
                 <div className="relative">
-                     <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                     <DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" /> {/* Centered icon */}
                     <Input
                         id="amount"
                         type="number"
                         value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        placeholder="例如：12.50"
+                         // Prevent negative numbers, allow decimals
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            // Allow empty string, allow numbers (int/float), prevent negative sign start
+                             if (val === '' || (/^\d*\.?\d*$/.test(val) && parseFloat(val) >= 0) || val === '.') {
+                                setAmount(val);
+                             }
+                        }}
+                        onBlur={(e) => {
+                             // Format to 2 decimal places on blur if it's a valid number
+                            const num = parseFloat(e.target.value);
+                            if (!isNaN(num) && num >= 0) {
+                                setAmount(num.toFixed(2));
+                            } else if (e.target.value !== '' && e.target.value !== '.') {
+                                // Clear invalid input on blur (optional)
+                                // setAmount('');
+                            }
+                        }}
+                        placeholder="0.00"
                         className="pl-8" // Add padding for the icon
-                        step="0.01" // Allow decimals
+                        step="0.01" // Hint for browser controls
+                        min="0" // HTML5 validation
+                        inputMode="decimal" // Hint for mobile keyboards
+                         aria-label="輸入金額或費用"
                     />
                 </div>
             </div>
 
           </CardContent>
-          <CardFooter className="flex-col sm:flex-row gap-2">
-            <Button onClick={logCalories} className="bg-accent text-accent-foreground hover:bg-accent/90 w-full sm:w-auto" disabled={!editedFoodItem || isLoading}>
+          <CardFooter className="flex-col sm:flex-row gap-2 pt-4"> {/* Add padding top */}
+             {/* Make Log button more prominent */}
+            <Button onClick={logCalories} className="bg-primary text-primary-foreground hover:bg-primary/90 w-full sm:w-auto flex-1 sm:flex-none" disabled={!editedFoodItem || !editedFoodItem.trim() || isLoading}>
               {isLoading ? <LoadingSpinner size={16} className="mr-2"/> : <PlusCircle className="mr-2 h-4 w-4" />}
                記錄卡路里
             </Button>
@@ -506,11 +650,19 @@ export default function CalorieLogger() {
           <CardContent className="space-y-4">
              {isCameraOpen && (
                 <div className="relative">
-                    <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-md border aspect-video object-cover bg-muted"></video> {/* Added muted and bg-muted */}
-                    <Button onClick={takePicture} className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-3 h-auto shadow-lg z-10" aria-label="拍攝照片">
+                     {/* Ensure video element fits well and shows background while loading */}
+                    <video ref={videoRef} playsInline muted className="w-full rounded-md border aspect-video object-cover bg-muted"></video>
+                     {/* Take Picture Button */}
+                    <Button
+                        onClick={takePicture}
+                        className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-3 h-auto shadow-lg z-10 border-2 border-background" // Added border
+                        aria-label="拍攝照片"
+                        disabled={isLoading} // Disable while estimating
+                        >
                         <Camera size={24} />
                     </Button>
-                     <Button onClick={closeCamera} variant="ghost" size="icon" className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full z-10" aria-label="關閉相機">
+                     {/* Close Camera Button */}
+                     <Button onClick={closeCamera} variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/30 hover:bg-black/50 text-white rounded-full z-10" aria-label="關閉相機">
                         <X size={18} />
                     </Button>
                 </div>
@@ -518,32 +670,46 @@ export default function CalorieLogger() {
              {/* Hidden canvas for capturing frame */}
             <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
 
-            {!isCameraOpen && imageSrc && !estimationResult && !isLoading && !error && ( // Show preview only when relevant
-              <div className="relative aspect-video w-full overflow-hidden rounded-md border">
-                <Image src={imageSrc} alt="選取的食物品項" layout="fill" objectFit="contain" data-ai-hint="食物 盤子"/>
-                 <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full" onClick={() => setImageSrc(null)} aria-label="清除影像">
+            {/* Image Preview (when image selected/taken but not yet processed or logged) */}
+            {!isCameraOpen && imageSrc && !estimationResult && !isLoading && !error && (
+              <div className="relative aspect-video w-full overflow-hidden rounded-md border bg-muted/30">
+                <Image
+                    src={imageSrc}
+                    alt="選取的食物品項"
+                    layout="fill"
+                    objectFit="contain" // Use contain to see the whole image
+                    data-ai-hint="食物 盤子"
+                    className="rounded-md"
+                />
+                 <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/30 hover:bg-black/50 text-white rounded-full" onClick={() => {setImageSrc(null); clearEstimation();}} aria-label="清除影像">
                     <X size={18} />
                 </Button>
               </div>
             )}
-             {!isCameraOpen && !imageSrc && !estimationResult && !isLoading && !error && ( // Placeholder
-                 <div className="flex items-center justify-center h-40 border-2 border-dashed rounded-md text-muted-foreground bg-muted/50"> {/* Added background */}
+
+             {/* Placeholder when no image, camera, or results */}
+             {!isCameraOpen && !imageSrc && !estimationResult && !isLoading && !error && (
+                 <div className="flex flex-col items-center justify-center h-40 border-2 border-dashed rounded-md text-muted-foreground bg-muted/50 p-4 text-center">
+                     <Camera size={32} className="mb-2 opacity-50" />
                     <p>預覽畫面會顯示在此</p>
+                     <p className="text-xs">開啟相機或上傳照片</p>
                  </div>
             )}
-             {/* Buttons area */}
+
+             {/* Buttons area - Conditionally render based on state */}
             {!isCameraOpen && !estimationResult && !isLoading && !error && (
-                <div className="flex gap-2 justify-center pt-2">
-                    <Button onClick={openCamera} variant="outline" disabled={isLoading}>
+                <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                    <Button onClick={openCamera} variant="outline" disabled={isLoading} className="w-full sm:w-auto">
                         <Camera className="mr-2 h-4 w-4" /> 開啟相機
                     </Button>
-                    <Button onClick={triggerFileInput} variant="outline" disabled={isLoading}>
+                     {/* Change text based on whether an image is already selected */}
+                    <Button onClick={triggerFileInput} variant="outline" disabled={isLoading} className="w-full sm:w-auto">
                         {imageSrc ? "更換照片" : "上傳照片"}
                     </Button>
                     <Input
                         type="file"
-                        accept="image/*"
-                        capture="environment" // Hint for mobile camera
+                         accept="image/jpeg,image/png,image/webp,image/heic" // Specify accepted types
+                         capture="environment" // Hint for mobile camera (takes precedence over accept sometimes)
                         ref={fileInputRef}
                         onChange={handleImageChange}
                         className="hidden"
@@ -551,24 +717,27 @@ export default function CalorieLogger() {
                     />
                 </div>
             )}
-            {/* Show loading/error within this card if no estimation result card is shown */}
+
+            {/* Show loading/error within this card only if estimation card isn't shown */}
              {isLoading && !estimationResult && (
                 <div className="flex flex-col items-center justify-center p-6 space-y-2">
                     <LoadingSpinner size={32} />
                     <p className="text-muted-foreground">正在估計卡路里...</p>
                 </div>
              )}
+             {/* Show error here only if not showing the main estimation error card */}
             {error && !estimationResult && (
-                 <div className="mt-4 p-4 border border-destructive bg-destructive/10 rounded-md text-destructive-foreground"> {/* Ensure text is readable */}
+                 <div className="mt-4 p-3 border border-destructive bg-destructive/10 rounded-md text-destructive-foreground text-sm flex justify-between items-center">
                     <p>{error}</p>
-                    <Button variant="link" size="sm" className="text-destructive-foreground underline mt-1 p-0 h-auto" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button> {/* Use link for dismiss */}
+                    <Button variant="ghost" size="sm" className="text-destructive-foreground underline p-0 h-auto hover:bg-transparent" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button>
                  </div>
              )}
           </CardContent>
         </Card>
 
-       {/* Render Estimation/Log Details Card only when there's a result or specific error state */}
-       { (estimationResult || (error && !isLoading)) && renderEstimationResult()}
+       {/* Render Estimation/Log Details Card */}
+       {/* This card now handles its own loading/error/result states internally */}
+        { (imageSrc || isLoading || error || estimationResult) && !isCameraOpen && renderEstimationResult()}
 
       </div>
 
@@ -580,77 +749,77 @@ export default function CalorieLogger() {
             <CardDescription>最近記錄的項目。</CardDescription>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[600px] pr-4">
+            {/* Adjust height based on viewport, ensure scrollbar visible */}
+             <ScrollArea className="h-[calc(100vh-250px)] min-h-[400px] pr-3"> {/* Example height, adjust as needed */}
               {calorieLog.length === 0 ? (
-                 <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4">
+                 <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4 pt-16"> {/* Added padding top */}
                     <UtensilsCrossed className="w-12 h-12 mb-4 opacity-50" />
-                    <p>您的卡路里記錄是空的。</p>
-                    <p>拍張照片開始記錄吧！</p>
+                    <p className="text-lg font-medium">您的記錄是空的</p>
+                    <p>拍下食物照片開始記錄吧！</p>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {/* Map over LogEntryStorage, not LogEntryDisplay */}
-                  {calorieLog.map((entry) => (
-                    <div key={entry.id}>
+                  {calorieLog.map((entry, index) => ( // Add index
+                    <React.Fragment key={entry.id}> {/* Use Fragment */}
                       <div className="flex items-start space-x-4">
-                        {/* Placeholder for Image - Since we removed imageUrl from storage */}
-                        <div className="w-[80px] h-[80px] flex items-center justify-center rounded-md bg-muted border text-muted-foreground">
+                        {/* Placeholder for Image */}
+                         <div className="w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0"> {/* Fixed size */}
                            <ImageOff size={32} aria-label="無可用影像"/>
                         </div>
-                        {/* Original Image component commented out */}
-                        {/* <Image
-                            src={entry.imageUrl} // This property no longer exists on stored entry
-                            alt={entry.foodItem}
-                            width={80}
-                            height={80}
-                            className="rounded-md object-cover aspect-square border"
-                            data-ai-hint="食物 品項"
-                        /> */}
-                        <div className="flex-1 space-y-1.5">
-                            <p className="font-semibold text-base">{entry.foodItem}</p>
+
+                        <div className="flex-1 space-y-1 overflow-hidden"> {/* Prevent text overflow */}
+                            <p className="font-semibold text-base truncate">{entry.foodItem}</p> {/* Truncate long names */}
                             <p className="text-sm text-primary">{entry.calorieEstimate} 大卡</p>
 
                              <div className="text-xs text-muted-foreground space-y-0.5">
-                                {entry.mealType && (
-                                    <div className="flex items-center">
-                                        {renderMealIcon(entry.mealType)}
-                                        <span>{mealTypeTranslations[entry.mealType]}</span> {/* Use translated text */}
-                                    </div>
-                                )}
+                                 {/* Combine Meal Type and Time */}
+                                 <div className="flex items-center flex-wrap gap-x-2">
+                                    {entry.mealType && (
+                                        <div className="flex items-center">
+                                            {renderMealIcon(entry.mealType)}
+                                            <span>{mealTypeTranslations[entry.mealType]}</span> {/* Use translated text */}
+                                        </div>
+                                    )}
+                                     <span>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                                    <span>({new Date(entry.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })})</span>
+                                 </div>
+
                                 {entry.location && (
                                     <div className="flex items-center">
-                                        <MapPin className="h-3.5 w-3.5 inline-block mr-1" />
-                                        <span>{entry.location}</span>
+                                        <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" /> {/* Prevent shrinking */}
+                                        <span className="truncate">{entry.location}</span> {/* Truncate long locations */}
                                     </div>
                                 )}
-                                {entry.amount !== undefined && entry.amount !== null && ( // Check for null as well
+                                {entry.amount !== undefined && entry.amount !== null && (
                                     <div className="flex items-center">
-                                        <DollarSign className="h-3.5 w-3.5 inline-block mr-1" />
-                                        {/* Ensure amount is treated as number */}
-                                        <span>{typeof entry.amount === 'number' ? entry.amount.toFixed(2) : 'N/A'}</span>
+                                        <DollarSign className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
+                                        {/* Ensure amount is treated as number and formatted */}
+                                        <span>{(typeof entry.amount === 'number' ? entry.amount.toFixed(2) : 'N/A')} 元</span> {/* Added currency unit */}
                                     </div>
                                 )}
-                                <p>
-                                    記錄時間： {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(entry.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                                </p>
+                                {/* <p> Confidence: {Math.round(entry.confidence * 100)}% </p> */} {/* Optional: Show confidence */}
+
                              </div>
 
                         </div>
+                        {/* Delete Button */}
                         <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => deleteLogEntry(entry.id)}
-                            className="text-destructive hover:bg-destructive/10 mt-1 shrink-0" // Added shrink-0
+                            className="text-destructive hover:bg-destructive/10 mt-1 shrink-0 self-start" // Align top
                             aria-label={`刪除 ${entry.foodItem} 的記錄項目`}
+                            title={`刪除 ${entry.foodItem}`} // Tooltip
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                       {/* Add separator only if it's not the last item */}
-                      {calorieLog.indexOf(entry) < calorieLog.length - 1 && (
+                      {index < calorieLog.length - 1 && (
                          <Separator className="my-4" />
                       )}
-                    </div>
+                    </React.Fragment> // Close Fragment
                   ))}
                 </div>
               )}
