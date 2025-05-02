@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import ReactCrop, { type Crop as CropType, centerCrop, makeAspectCrop, PixelCrop } from 'react-image-crop'; // Import react-image-crop
 import 'react-image-crop/dist/ReactCrop.css'; // Import css styles for react-image-crop
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for placeholder
-import { format, startOfDay, parseISO, isValid } from 'date-fns'; // Import date-fns functions, add isValid
+import { format, startOfDay, parseISO, isValid, isDate } from 'date-fns'; // Import date-fns functions, add isValid, isDate
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -204,7 +204,7 @@ const calculateEstimatedNeeds = (profile: UserProfile): number | null => {
 
 // Format date/time for datetime-local input
 const formatDateTimeLocal = (timestamp: number): string => {
-  if (!timestamp) return '';
+  if (!timestamp || typeof timestamp !== 'number') return '';
   try {
     const date = new Date(timestamp);
     if (!isValid(date)) return ''; // Check if date is valid
@@ -313,37 +313,68 @@ export default function CalorieLogger() {
 
   // Calculate Daily Summaries when log changes
   useEffect(() => {
-    if (!isClient || calorieLog.length === 0) {
-        setDailySummaries([]); // Clear summaries if log is empty or not on client
+    if (!isClient || !Array.isArray(calorieLog)) { // Ensure calorieLog is an array
+        setDailySummaries([]); // Clear summaries if log is empty, not an array, or not on client
         return;
     }
 
     const summaries: { [date: string]: DailySummary } = {};
 
     calorieLog.forEach(entry => {
-        const entryDate = format(startOfDay(new Date(entry.timestamp)), 'yyyy-MM-dd');
-        if (!summaries[entryDate]) {
-            summaries[entryDate] = {
-                date: entryDate,
-                totalCalories: 0,
-                totalAmount: 0,
-                entries: []
-            };
+       if (!entry || typeof entry !== 'object' || !entry.timestamp || typeof entry.timestamp !== 'number') {
+            console.warn("Skipping invalid log entry:", entry);
+            return; // Skip invalid entries
         }
-        summaries[entryDate].totalCalories += entry.calorieEstimate;
-        summaries[entryDate].totalAmount += entry.amount || 0;
-        summaries[entryDate].entries.push(entry);
+
+       try {
+           const entryDateObj = new Date(entry.timestamp);
+           if (!isValid(entryDateObj)) { // Check if date is valid using date-fns
+                console.warn("Skipping log entry with invalid timestamp:", entry);
+                return; // Skip entries with invalid timestamps
+            }
+
+            const entryDate = format(startOfDay(entryDateObj), 'yyyy-MM-dd');
+
+            if (!summaries[entryDate]) {
+                summaries[entryDate] = {
+                    date: entryDate,
+                    totalCalories: 0,
+                    totalAmount: 0,
+                    entries: []
+                };
+            }
+
+            // Safely add calories and amount, defaulting to 0 if invalid
+            const calories = typeof entry.calorieEstimate === 'number' && !isNaN(entry.calorieEstimate) ? entry.calorieEstimate : 0;
+            const amount = typeof entry.amount === 'number' && !isNaN(entry.amount) ? entry.amount : 0;
+
+            summaries[entryDate].totalCalories += calories;
+            summaries[entryDate].totalAmount += amount;
+            summaries[entryDate].entries.push(entry);
+
+       } catch (dateError) {
+           console.error("Error processing date for log entry:", entry, dateError);
+           // Skip this entry if date processing fails
+       }
     });
 
-    // Sort entries within each summary by timestamp (descending)
+    // Sort entries within each summary by timestamp (descending) - Safely
     Object.values(summaries).forEach(summary => {
-        summary.entries.sort((a, b) => b.timestamp - a.timestamp);
+        summary.entries.sort((a, b) => {
+            const timeA = typeof a.timestamp === 'number' ? a.timestamp : 0;
+            const timeB = typeof b.timestamp === 'number' ? b.timestamp : 0;
+            return timeB - timeA; // Descending order
+        });
     });
 
-    // Convert to array and sort summaries by date (descending)
-    const sortedSummaries = Object.values(summaries).sort((a, b) =>
-        b.date.localeCompare(a.date) // Sorts YYYY-MM-DD strings correctly
-    );
+    // Convert to array and sort summaries by date (descending) - Safely
+    const sortedSummaries = Object.values(summaries).sort((a, b) => {
+        // Basic string comparison works for 'yyyy-MM-dd' format
+        if (a.date < b.date) return 1;
+        if (a.date > b.date) return -1;
+        return 0;
+    });
+
 
     setDailySummaries(sortedSummaries);
   }, [calorieLog, isClient]); // Re-run when log or client status changes
@@ -796,25 +827,8 @@ export default function CalorieLogger() {
       const MAX_LOG_ENTRIES = 100; // Keep this relatively low due to image data size
       setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
 
-      // If no storage error occurred after setting the state, proceed with UI updates.
-      // Check storageError state immediately after the potential update (although it might be slightly delayed)
-      // A better approach might be to check it in the useEffect that watches storageError,
-      // but for immediate feedback, we can try this.
-      // Note: This direct check might not catch the error immediately if state updates are async.
-      // The useEffect hook is the more reliable way to react to the error.
-      if (!storageError) {
-        // Clear the current image and results/fields after potentially successful logging
-        clearAll(); // Use the clearAll function
-        toast({
-            title: "記錄成功",
-            description: `${newLogEntry.foodItem} (${newLogEntry.calorieEstimate} 大卡) 已新增至您的記錄中。`,
-        });
-      } else {
-         // Error is already handled by the useEffect hook watching storageError,
-         // which will display the toast. No need to display another toast here.
-         console.error("Saving to localStorage failed (detected immediately):", storageError);
-      }
-
+      // Check storageError state after the potential update using useEffect
+      // (The check within useEffect is more reliable)
 
     } else {
          let errorDesc = "沒有可記錄的估計結果或影像。";
@@ -828,6 +842,33 @@ export default function CalorieLogger() {
          });
     }
   };
+
+  // UseEffect to show success toast only after successful state update and no storage error
+  useEffect(() => {
+     // Check if a new entry was just potentially added (e.g., by comparing lengths or finding the last entry)
+     // This logic might need refinement depending on how you identify a 'just added' entry.
+     // For simplicity, we'll show the toast if there's no current storage error.
+     if (isClient && !storageError && !isLoading && estimationResult && imageSrc) {
+         // Check if the action that triggers logCalories has recently completed
+         // This is tricky without adding more state. A potential (but not perfect) way
+         // is to check if the estimationResult and imageSrc match the last added log entry.
+         // However, a simpler approach for now: assume if we get here without error, it was successful.
+         // We need to clear the state *after* the toast is shown, perhaps in another effect or delayed.
+
+         // Find the potentially just added entry (assuming it's the first one after update)
+         const lastEntry = calorieLog[0];
+          if (lastEntry && lastEntry.imageUrl === imageSrc && lastEntry.foodItem === editedFoodItem.trim()) {
+              toast({
+                 title: "記錄成功",
+                 description: `${lastEntry.foodItem} (${lastEntry.calorieEstimate} 大卡) 已新增至您的記錄中。`,
+              });
+              // Now clear the input state
+              clearAll();
+          }
+     }
+     // Intentionally not depending on estimationResult, imageSrc, editedFoodItem to avoid infinite loops
+     // Depend on calorieLog and storageError
+  }, [calorieLog, storageError, isClient, toast]); // Removed isLoading, estimationResult, imageSrc, editedFoodItem
 
 
   const deleteLogEntry = (id: string) => {
@@ -965,7 +1006,9 @@ export default function CalorieLogger() {
             const numValue = value === '' ? undefined : parseFloat(value as string);
             processedValue = numValue !== undefined && !isNaN(numValue) && numValue >= 0 ? numValue : undefined;
         } else if (field === 'activityLevel') {
-            processedValue = value as ActivityLevel | undefined;
+            // Ensure the value is one of the valid ActivityLevel keys
+            const validLevels = Object.keys(activityLevelTranslations);
+            processedValue = validLevels.includes(value as string) ? (value as ActivityLevel) : undefined;
         } else {
              // Should not happen with current fields, but good practice
              return prev;
@@ -1209,6 +1252,7 @@ export default function CalorieLogger() {
 
   const renderLogEntry = (entry: LogEntryStorage) => {
     const isEditing = editingEntryId === entry.id;
+    const entryTimestamp = entry.timestamp && typeof entry.timestamp === 'number' ? entry.timestamp : Date.now(); // Fallback if timestamp is bad
 
     return (
         <div className="flex items-start space-x-3 sm:space-x-4 py-3">
@@ -1217,7 +1261,7 @@ export default function CalorieLogger() {
                 {entry.imageUrl ? (
                     <Image
                         src={entry.imageUrl}
-                        alt={`記錄項目：${entry.foodItem}`}
+                        alt={`記錄項目：${entry.foodItem || '未知食物'}`}
                         fill sizes="(max-width: 640px) 4rem, 5rem"
                         style={{ objectFit: 'cover' }} className="rounded-md" data-ai-hint="食物 盤子" loading="lazy"
                         onError={(e) => {
@@ -1303,17 +1347,22 @@ export default function CalorieLogger() {
                     </>
                 ) : (
                     <>
-                        <p className="font-semibold text-base truncate">{entry.foodItem}</p>
-                        <p className="text-sm text-primary">{entry.calorieEstimate} 大卡</p>
+                        <p className="font-semibold text-base truncate">{entry.foodItem || '未知食物'}</p>
+                        <p className="text-sm text-primary">
+                           {typeof entry.calorieEstimate === 'number' && !isNaN(entry.calorieEstimate) ? entry.calorieEstimate : '??'} 大卡
+                        </p>
                         <div className="text-xs text-muted-foreground space-y-0.5">
                             <div className="flex items-center flex-wrap gap-x-2">
-                                {entry.mealType && (
+                                {entry.mealType && mealTypeTranslations[entry.mealType] && ( // Check if mealType is valid
                                     <div className="flex items-center">
                                         {renderMealIcon(entry.mealType)}
                                         <span>{mealTypeTranslations[entry.mealType]}</span>
                                     </div>
                                 )}
-                                <span>{format(new Date(entry.timestamp), 'yyyy/MM/dd HH:mm')}</span> {/* Display formatted date/time */}
+                                <span>
+                                    {/* Safely format date */}
+                                    {isValid(new Date(entryTimestamp)) ? format(new Date(entryTimestamp), 'yyyy/MM/dd HH:mm') : '無效時間'}
+                                </span>
                             </div>
                             {entry.location && (
                                 <div className="flex items-center">
@@ -1321,10 +1370,10 @@ export default function CalorieLogger() {
                                     <span className="truncate">{entry.location}</span>
                                 </div>
                             )}
-                            {entry.amount !== undefined && entry.amount !== null && (
+                            {entry.amount !== undefined && entry.amount !== null && typeof entry.amount === 'number' && !isNaN(entry.amount) && (
                                 <div className="flex items-center">
                                     <DollarSign className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
-                                    <span>{(typeof entry.amount === 'number' ? entry.amount.toFixed(2) : 'N/A')} 元</span>
+                                    <span>{entry.amount.toFixed(2)} 元</span>
                                 </div>
                             )}
                         </div>
@@ -1345,10 +1394,10 @@ export default function CalorieLogger() {
                     </>
                 ) : (
                     <>
-                        <Button variant="ghost" size="icon" onClick={() => startEditing(entry)} className="text-muted-foreground hover:bg-muted/10 h-8 w-8" aria-label={`編輯 ${entry.foodItem}`} title={`編輯 ${entry.foodItem}`}>
+                        <Button variant="ghost" size="icon" onClick={() => startEditing(entry)} className="text-muted-foreground hover:bg-muted/10 h-8 w-8" aria-label={`編輯 ${entry.foodItem || '項目'}`} title={`編輯 ${entry.foodItem || '項目'}`}>
                             <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => deleteLogEntry(entry.id)} className="text-destructive hover:bg-destructive/10 h-8 w-8" aria-label={`刪除 ${entry.foodItem}`} title={`刪除 ${entry.foodItem}`}>
+                        <Button variant="ghost" size="icon" onClick={() => deleteLogEntry(entry.id)} className="text-destructive hover:bg-destructive/10 h-8 w-8" aria-label={`刪除 ${entry.foodItem || '項目'}`} title={`刪除 ${entry.foodItem || '項目'}`}>
                             <Trash2 className="h-4 w-4" />
                         </Button>
                     </>
@@ -1548,7 +1597,7 @@ export default function CalorieLogger() {
                     <Label htmlFor="activityLevel" className="flex items-center gap-1"><Activity size={14}/> 活動水平</Label>
                     <Select
                         value={userProfile.activityLevel}
-                        onValueChange={(value) => handleProfileChange('activityLevel', value as ActivityLevel)}
+                        onValueChange={(value) => handleProfileChange('activityLevel', value as ActivityLevel | undefined)}
                     >
                         <SelectTrigger id="activityLevel" aria-label="選取活動水平">
                            {/* Hydration fix: Conditionally render SelectValue */}
@@ -1629,34 +1678,51 @@ export default function CalorieLogger() {
                 </div>
               ) : (
                 <Accordion type="single" collapsible className="w-full space-y-4">
-                   {dailySummaries.map((summary, index) => (
-                      <AccordionItem key={summary.date} value={`item-${index}`}>
-                        <Card className="overflow-hidden"> {/* Apply overflow hidden to card */}
-                           <AccordionTrigger className="px-4 py-3 hover:no-underline bg-muted/50">
-                             <div className="flex justify-between items-center w-full">
-                               <span className="font-semibold text-base">
-                                 {format(parseISO(summary.date), 'yyyy年MM月dd日')} {/* Format date */}
-                               </span>
-                               <div className="text-sm text-right">
-                                 <p className="text-primary">{summary.totalCalories} 大卡</p>
-                                 {summary.totalAmount > 0 && (
-                                     <p className="text-muted-foreground">{summary.totalAmount.toFixed(2)} 元</p>
-                                 )}
-                               </div>
-                             </div>
-                           </AccordionTrigger>
-                           <AccordionContent className="border-t border-border"> {/* Add border */}
-                             <div className="p-2 sm:p-4 divide-y divide-border"> {/* Adjust padding and add dividers */}
-                               {summary.entries.map((entry) => (
-                                   <React.Fragment key={entry.id}>
-                                      {renderLogEntry(entry)}
-                                   </React.Fragment>
-                               ))}
-                             </div>
-                           </AccordionContent>
-                        </Card>
-                      </AccordionItem>
-                    ))}
+                   {dailySummaries.map((summary, index) => {
+                       let summaryDate: Date | null = null;
+                       try {
+                           summaryDate = parseISO(summary.date); // Parse the date string
+                           if (!isValid(summaryDate)) { // Check if parsing was successful
+                              console.warn(`Invalid date string in summary: ${summary.date}`);
+                              summaryDate = null; // Treat as invalid
+                           }
+                       } catch (e) {
+                           console.error(`Error parsing date string in summary: ${summary.date}`, e);
+                           summaryDate = null;
+                       }
+
+                       return (
+                           <AccordionItem key={summary.date} value={`item-${index}`}>
+                             <Card className="overflow-hidden"> {/* Apply overflow hidden to card */}
+                                <AccordionTrigger className="px-4 py-3 hover:no-underline bg-muted/50">
+                                  <div className="flex justify-between items-center w-full">
+                                    <span className="font-semibold text-base">
+                                      {summaryDate ? format(summaryDate, 'yyyy年MM月dd日') : '無效日期'} {/* Format date safely */}
+                                    </span>
+                                    <div className="text-sm text-right">
+                                      <p className="text-primary">
+                                          {/* Safely display total calories */}
+                                         {typeof summary.totalCalories === 'number' && !isNaN(summary.totalCalories) ? summary.totalCalories : '??'} 大卡
+                                      </p>
+                                      {summary.totalAmount > 0 && typeof summary.totalAmount === 'number' && !isNaN(summary.totalAmount) && (
+                                          <p className="text-muted-foreground">{summary.totalAmount.toFixed(2)} 元</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </AccordionTrigger>
+                                <AccordionContent className="border-t border-border"> {/* Add border */}
+                                  <div className="p-2 sm:p-4 divide-y divide-border"> {/* Adjust padding and add dividers */}
+                                    {summary.entries.map((entry) => (
+                                        <React.Fragment key={entry.id}>
+                                           {renderLogEntry(entry)}
+                                        </React.Fragment>
+                                    ))}
+                                  </div>
+                                </AccordionContent>
+                             </Card>
+                           </AccordionItem>
+                       );
+                   })}
                 </Accordion>
 
               )}
