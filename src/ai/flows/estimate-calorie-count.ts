@@ -19,10 +19,11 @@ const EstimateCalorieCountInputSchema = z.object({
 });
 export type EstimateCalorieCountInput = z.infer<typeof EstimateCalorieCountInputSchema>;
 
+// Updated Output Schema
 const EstimateCalorieCountOutputSchema = z.object({
-  isFoodItem: z.boolean().describe('影像中是否包含可辨識的食物品項。'), // Added isFoodItem
-  foodItem: z.string().describe('影像中辨識出的食物品項 (如果 isFoodItem 為 false，此項可能為空或代表非食物品項)。'),
-  calorieEstimate: z.number().describe('食物品項的估計卡路里數 (如果 isFoodItem 為 false，此項可能為 0 或不準確)。'),
+  isFoodItem: z.boolean().describe('影像是否包含可辨識的食物品項。'),
+  foodItem: z.string().describe('影像中辨識出的食物品項 (如果 isFoodItem 為 true)。如果不是食物，則為影像內容描述。'),
+  calorieEstimate: z.number().describe('食物品項的估計卡路里數 (如果 isFoodItem 為 true)。如果不是食物，則為 0。'),
   confidence: z.number().describe('卡路里估計的信賴度（0-1）。'),
 });
 export type EstimateCalorieCountOutput = z.infer<typeof EstimateCalorieCountOutputSchema>;
@@ -33,6 +34,7 @@ export async function estimateCalorieCount(
   return estimateCalorieCountFlow(input);
 }
 
+// Updated Prompt Definition
 const prompt = ai.definePrompt({
   name: 'estimateCalorieCountPrompt',
   input: {
@@ -45,18 +47,24 @@ const prompt = ai.definePrompt({
     }),
   },
   output: {
-    // Using the updated schema for output definition
+    // Use the updated output schema here
     schema: EstimateCalorieCountOutputSchema,
   },
-  prompt: `你是營養專家。你的任務是：
-1. 判斷提供的影像中是否包含可辨識的食物品項。將判斷結果設定到 'isFoodItem' 欄位 (true 或 false)。
-2. 如果影像是食物品項 (isFoodItem 為 true)，請辨識該食物品項，估計其卡路里數，並提供估計的信賴度。
-3. 如果影像不是食物品項 (isFoodItem 為 false)，請在 'foodItem' 欄位簡短說明影像內容 (例如：「一隻貓」、「一本書」)，並將 'calorieEstimate' 設為 0，信賴度設為 0。
+  // Updated Prompt String
+  prompt: `你是營養專家。請分析以下影像。
 
-分析以下影像，並根據上述指示提供結果。
+  1. 判斷影像中是否包含可辨識的食物品項。將此判斷結果設為 'isFoodItem' 欄位 (true 或 false)。
+  2. 如果 'isFoodItem' 為 true：
+     - 辨識主要的食物品項，並將其名稱設為 'foodItem'。
+     - 估計該食物品項的卡路里數，並將其設為 'calorieEstimate'。
+     - 提供卡路里估計的信賴度（0 到 1 之間），並將其設為 'confidence'。
+  3. 如果 'isFoodItem' 為 false：
+     - 將 'foodItem' 設為影像內容的簡短描述 (例如：「一本書」、「一隻貓」)。
+     - 將 'calorieEstimate' 設為 0。
+     - 將 'confidence' 設為 0。
 
-影像： {{media url=photoDataUri}}
-`,
+  影像： {{media url=photoDataUri}}
+  `,
 });
 
 const estimateCalorieCountFlow = ai.defineFlow<
@@ -65,15 +73,16 @@ const estimateCalorieCountFlow = ai.defineFlow<
 >({
   name: 'estimateCalorieCountFlow',
   inputSchema: EstimateCalorieCountInputSchema,
-  outputSchema: EstimateCalorieCountOutputSchema, // Ensure flow uses the updated schema
+  outputSchema: EstimateCalorieCountOutputSchema, // Use updated schema
 },
 async input => {
   const {output} = await prompt(input);
-  // If the output is somehow null/undefined (shouldn't happen with schema), provide a default 'not food' response
-  return output || {
-      isFoodItem: false,
-      foodItem: "無法分析影像",
-      calorieEstimate: 0,
-      confidence: 0,
-  };
+  // Ensure output matches the schema, especially when isFoodItem is false
+  if (!output) {
+     throw new Error("AI flow did not return a valid output.");
+  }
+  // No need to manually set defaults if the prompt handles it correctly.
+  // Just return the validated output.
+  return output;
 });
+
