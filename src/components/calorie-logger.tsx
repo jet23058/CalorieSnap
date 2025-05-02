@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
@@ -83,7 +84,7 @@ type EditedEntryData = Partial<Pick<LogEntryStorage, 'foodItem' | 'calorieEstima
 
 // Compression settings
 const IMAGE_MAX_WIDTH = 1024; // Max width for the compressed image
-const IMAGE_QUALITY = 0.8; // JPEG quality (0 to 1)
+const IMAGE_QUALITY = 0.6; // JPEG quality (0 to 1) - Changed from 0.8 to 0.6
 const CROP_ASPECT = 16 / 9; // Aspect ratio for the crop tool
 
 // Helper function for centering the crop - NOT USED FOR INITIAL CROP ANYMORE
@@ -416,7 +417,7 @@ export default function CalorieLogger() {
         });
       },
       (geoError) => {
-        // Log specific error details - Already improved
+        // Log specific error details - Improved
         console.error(`取得地點時發生錯誤 (代碼: ${geoError.code || '未知'}): ${geoError.message || '沒有訊息'}`, geoError);
 
 
@@ -846,8 +847,8 @@ export default function CalorieLogger() {
         // Log the entry using the setCalorieLog setter which handles errors
         // Error handling is now done within the custom hook via the error state
         // No need for try-catch here, just call the setter.
-        // Limit the log size (e.g., keep only the latest entries)
-        const MAX_LOG_ENTRIES = 10; // Further reduced max entries due to image data size
+        // Limit the log size (e.g., keep only the latest 100 entries)
+        const MAX_LOG_ENTRIES = 10; // Limit entries to avoid quota errors - significantly reduced
         setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
         // Toast for success moved to useEffect to ensure state update and check for storage error
 
@@ -1681,7 +1682,10 @@ export default function CalorieLogger() {
                         onValueChange={(value) => handleProfileChange('activityLevel', value as ActivityLevel | undefined)}
                     >
                         <SelectTrigger id="activityLevel" aria-label="選取活動水平">
-                          <SelectValue placeholder="選取您的活動水平" />
+                           {/* Ensure placeholder doesn't cause hydration error */}
+                           <SelectValue placeholder={isClient ? "選取您的活動水平" : undefined}>
+                              {userProfile.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : (isClient ? "選取您的活動水平" : null)}
+                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                             {Object.entries(activityLevelTranslations).map(([key, label]) => (
