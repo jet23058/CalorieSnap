@@ -14,7 +14,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingSpinner } from '@/components/loading-spinner';
-import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp } from 'lucide-react'; // Added ImageUp
+import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop } from 'lucide-react'; // Added ImageUp, Crop
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog'; // Import Dialog components
+import ReactCrop, { type Crop as CropType, centerCrop, makeAspectCrop, PixelCrop } from 'react-image-crop'; // Import react-image-crop
+import 'react-image-crop/dist/ReactCrop.css'; // Import css styles for react-image-crop
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 const mealTypeTranslations: Record<MealType, string> = {
@@ -44,47 +47,116 @@ interface LogEntryDisplay extends LogEntryStorage {
 // Compression settings
 const IMAGE_MAX_WIDTH = 1024; // Max width for the compressed image
 const IMAGE_QUALITY = 0.8; // JPEG quality (0 to 1)
+const CROP_ASPECT = 16 / 9; // Aspect ratio for the crop tool
 
-// Helper function for image compression
-async function compressImage(dataUrl: string, maxWidth: number, quality: number): Promise<string> {
+// Helper function for centering the crop
+function centerAspectCrop(
+  mediaWidth: number,
+  mediaHeight: number,
+  aspect: number,
+): CropType {
+  return centerCrop(
+    makeAspectCrop(
+      {
+        unit: '%',
+        width: 90, // Start with 90% width crop
+      },
+      aspect,
+      mediaWidth,
+      mediaHeight,
+    ),
+    mediaWidth,
+    mediaHeight,
+  );
+}
+
+// Helper function to get cropped image data URL
+function getCroppedImg(
+  image: HTMLImageElement,
+  crop: PixelCrop, // Use PixelCrop
+  fileName: string = 'cropped-image.jpeg' // Optional filename
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    const img = document.createElement('img');
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+    const canvas = document.createElement('canvas');
+    const scaleX = image.naturalWidth / image.width;
+    const scaleY = image.naturalHeight / image.height;
+    // devicePixelRatio slightly increases sharpness on retina devices
+    // but can increase file size. Remove if not needed.
+    const pixelRatio = window.devicePixelRatio || 1;
 
-      if (!ctx) {
-        return reject(new Error('無法取得畫布內容以壓縮影像。'));
-      }
+    canvas.width = Math.floor(crop.width * scaleX * pixelRatio);
+    canvas.height = Math.floor(crop.height * scaleY * pixelRatio);
 
-      let width = img.width;
-      let height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return reject(new Error('無法取得畫布內容以裁切影像。'));
+    }
 
-      // Calculate new dimensions
-      if (width > maxWidth) {
-        height = Math.round((height * maxWidth) / width);
-        width = maxWidth;
-      }
+    ctx.scale(pixelRatio, pixelRatio);
+    ctx.imageSmoothingQuality = 'high'; // Or 'medium' or 'low'
 
-      canvas.width = width;
-      canvas.height = height;
-      ctx.drawImage(img, 0, 0, width, height);
+    const cropX = crop.x * scaleX;
+    const cropY = crop.y * scaleY;
 
-      // Get compressed data URL
-      const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-      resolve(compressedDataUrl);
-    };
-    img.onerror = (error) => {
-      console.error("載入影像以進行壓縮時發生錯誤:", error);
-      reject(new Error('載入影像以進行壓縮時失敗。'));
-    };
-    img.src = dataUrl;
+    const sourceX = cropX;
+    const sourceY = cropY;
+    const sourceWidth = crop.width * scaleX;
+    const sourceHeight = crop.height * scaleY;
+
+    const destX = 0;
+    const destY = 0;
+    const destWidth = crop.width * scaleX;
+    const destHeight = crop.height * scaleY;
+
+
+    // Correctly draw the cropped portion
+     try {
+        ctx.drawImage(
+            image,
+            sourceX,
+            sourceY,
+            sourceWidth,
+            sourceHeight,
+            destX,
+            destY,
+            destWidth,
+            destHeight,
+        );
+     } catch (e) {
+        console.error("繪製裁切影像時發生錯誤:", e);
+        return reject(new Error('繪製裁切影像時失敗。'));
+    }
+
+    // Get the data URL
+    // Use 'image/jpeg' and quality for compression at this stage too
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+           console.error("畫布轉換為 Blob 失敗");
+           return reject(new Error('無法將裁切後的畫布轉換為影像。'));
+        }
+        // Convert blob to data URL
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            resolve(reader.result as string);
+        };
+        reader.onerror = (error) => {
+            console.error("讀取裁切後的 Blob 時發生錯誤:", error);
+            reject(new Error('讀取裁切後的影像資料時失敗。'));
+        };
+        reader.readAsDataURL(blob);
+
+      },
+      'image/jpeg', // Use JPEG for better compression than PNG
+      IMAGE_QUALITY // Use the same quality setting
+    );
   });
 }
 
 
 export default function CalorieLogger() {
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null); // For cropper
+  const [imageSrc, setImageSrc] = useState<string | null>(null); // For preview after crop/compress
   const [estimationResult, setEstimationResult] = useState<EstimateCalorieCountOutput | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState<string>(''); // For specific loading messages
@@ -93,7 +165,8 @@ export default function CalorieLogger() {
   const [calorieLog, setCalorieLog] = useLocalStorage<LogEntryStorage[]>('calorieLog', []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null); // Used for taking picture
+  const imgRef = useRef<HTMLImageElement>(null); // Ref for the image in the cropper
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const { toast } = useToast();
@@ -104,6 +177,12 @@ export default function CalorieLogger() {
   const [isFetchingLocation, setIsFetchingLocation] = useState<boolean>(false);
   const [mealType, setMealType] = useState<MealType | undefined>(undefined);
   const [amount, setAmount] = useState<string>(''); // Use string for input
+
+  // State for cropping modal
+  const [isCropping, setIsCropping] = useState(false);
+  const [crop, setCrop] = useState<CropType>(); // Crop area state
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop>(); // Completed crop state (in pixels)
+
 
   // Cleanup camera stream on unmount or when camera is closed
   useEffect(() => {
@@ -142,7 +221,7 @@ export default function CalorieLogger() {
       },
       (geoError) => {
         // Log specific error details
-        console.error(`取得地點時發生錯誤: ${geoError.message || 'No message'} (代碼: ${geoError.code || 'No code'})`);
+        console.error(`取得地點時發生錯誤: ${geoError.message || 'No message'} (代碼: ${geoError.code || 'No code'})`, geoError);
 
         let description = "無法取得您的地點。";
         if (geoError.code === geoError.PERMISSION_DENIED) {
@@ -164,43 +243,29 @@ export default function CalorieLogger() {
     );
   }, [toast]);
 
-  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+ const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      setIsLoading(true);
-      setLoadingMessage('正在讀取並壓縮影像...');
       setError(null);
-      setImageSrc(null);
+      setImageSrc(null); // Clear final preview
+      setOriginalImageSrc(null); // Clear original image
       clearEstimation();
+      setCrop(undefined); // Reset crop state
+      setCompletedCrop(undefined);
 
       const reader = new FileReader();
-      reader.onload = async (e) => {
+      reader.onload = (e) => {
         const result = e.target?.result as string;
-        try {
-          const compressedDataUrl = await compressImage(result, IMAGE_MAX_WIDTH, IMAGE_QUALITY);
-          setImageSrc(compressedDataUrl); // Show compressed preview
-          setLoadingMessage('正在估計卡路里...'); // Update message for estimation
-          await estimateCalories(compressedDataUrl); // Start estimation with compressed image
-        } catch (compressionError) {
-          console.error("影像壓縮失敗:", compressionError);
-          setError(`影像壓縮失敗: ${compressionError instanceof Error ? compressionError.message : 'Unknown error'}`);
-          toast({
-            title: "處理錯誤",
-            description: "無法壓縮影像。請嘗試其他影像。",
-            variant: "destructive",
-          });
-          setIsLoading(false); // Ensure loading stops on error
-        } finally {
-           // Reset file input regardless of success/failure
-           if (fileInputRef.current) {
-               fileInputRef.current.value = "";
-           }
-        }
+        setOriginalImageSrc(result); // Set the original image for the cropper
+        setIsCropping(true); // Open the cropping modal
+        // Reset file input value here allows selecting the same file again
+         if (fileInputRef.current) {
+           fileInputRef.current.value = "";
+         }
       };
       reader.onerror = (err) => {
           console.error("讀取檔案時發生錯誤:", err);
           setError("讀取影像檔案時失敗。");
-          setIsLoading(false);
           toast({
              title: "檔案錯誤",
              description: "無法讀取所選的影像檔案。",
@@ -220,9 +285,75 @@ export default function CalorieLogger() {
     }
   };
 
+   // Called when image loads in the cropper
+  function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
+    const { width, height } = e.currentTarget;
+    // Set the initial crop area centered with the defined aspect ratio
+     if (width > 0 && height > 0) { // Ensure dimensions are valid
+      setCrop(centerAspectCrop(width, height, CROP_ASPECT));
+     } else {
+         console.warn("Image dimensions are zero on load, cannot set initial crop.");
+         // Optionally, set a default crop or wait for valid dimensions
+         setCrop({ unit: '%', width: 50, height: 50, x: 25, y: 25 }); // Example fallback
+     }
+  }
+
+   // Handle the crop confirmation
+  const handleCropConfirm = async () => {
+    if (completedCrop?.width && completedCrop?.height && imgRef.current && originalImageSrc) {
+      setIsLoading(true);
+      setLoadingMessage('正在裁切並壓縮影像...');
+      setIsCropping(false); // Close modal immediately
+
+      try {
+        // Get the cropped image data URL (already compressed by getCroppedImg)
+        const croppedDataUrl = await getCroppedImg(
+          imgRef.current,
+          completedCrop
+        );
+
+        setImageSrc(croppedDataUrl); // Set the final preview image
+        setOriginalImageSrc(null); // Clear original image source to free memory
+        setLoadingMessage('正在估計卡路里...');
+        await estimateCalories(croppedDataUrl); // Start estimation
+
+      } catch (cropError) {
+        console.error("影像裁切失敗:", cropError);
+        setError(`影像裁切失敗: ${cropError instanceof Error ? cropError.message : 'Unknown error'}`);
+        toast({
+          title: "處理錯誤",
+          description: "無法裁切影像。請再試一次。",
+          variant: "destructive",
+        });
+        setIsLoading(false); // Stop loading on error
+        setOriginalImageSrc(null); // Clear original image source on error
+      }
+    } else {
+        toast({
+            title: "裁切錯誤",
+            description: "請選取要裁切的區域。",
+            variant: "destructive",
+        });
+    }
+  };
+
+  // Handle closing the crop modal without confirming
+  const handleCropCancel = () => {
+    setIsCropping(false);
+    setOriginalImageSrc(null); // Clear original image
+    setCrop(undefined);
+    setCompletedCrop(undefined);
+    // Optionally clear file input again if needed
+    if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+    }
+  };
+
+
   const openCamera = async () => {
     setError(null);
     setImageSrc(null);
+    setOriginalImageSrc(null); // Clear original image if any
     clearEstimation();
     try {
       // Prefer environment camera, fallback to default
@@ -289,7 +420,8 @@ export default function CalorieLogger() {
       setIsLoading(true); // Start loading early
       setLoadingMessage('正在處理並壓縮影像...');
       setError(null);
-      setImageSrc(null);
+      setImageSrc(null); // Clear final preview
+      setOriginalImageSrc(null); // Clear original
       clearEstimation();
 
       const video = videoRef.current;
@@ -343,7 +475,7 @@ export default function CalorieLogger() {
 
 
         // Successfully captured and compressed image
-        setImageSrc(dataUri);
+        setImageSrc(dataUri); // Set final preview directly (no cropping for camera yet)
         closeCamera(); // Close camera after taking picture
         setLoadingMessage('正在估計卡路里...'); // Update message
         estimateCalories(dataUri); // Start estimation with compressed image
@@ -374,6 +506,17 @@ export default function CalorieLogger() {
      setMealType(undefined);
      setAmount('');
      setLoadingMessage(''); // Clear loading message as well
+  }
+
+  const clearAll = () => {
+      setImageSrc(null);
+      setOriginalImageSrc(null);
+      clearEstimation();
+      setIsCameraOpen(false);
+      closeCamera(); // Ensure stream is stopped if open
+       if (fileInputRef.current) {
+           fileInputRef.current.value = "";
+       }
   }
 
   const estimateCalories = useCallback(async (photoDataUri: string) => {
@@ -459,8 +602,7 @@ export default function CalorieLogger() {
           setCalorieLog(updatedLog);
 
           // Clear the current image and results/fields after logging
-          setImageSrc(null);
-          clearEstimation();
+          clearAll(); // Use the new clearAll function
           toast({
               title: "記錄成功",
               description: `${newLogEntry.foodItem} (${estimationResult.calorieEstimate} 大卡) 已新增至您的記錄中。`,
@@ -540,6 +682,7 @@ export default function CalorieLogger() {
   const triggerFileInput = () => {
      // Clear previous image src if user clicks upload again
      setImageSrc(null); // Optional: Decide if you want to clear preview immediately
+     setOriginalImageSrc(null); // Clear original too
      clearEstimation(); // Optional: Clear results too?
     fileInputRef.current?.click();
   };
@@ -578,7 +721,7 @@ export default function CalorieLogger() {
              </CardContent>
              <CardFooter>
                   {/* Make dismiss button more prominent */}
-                 <Button variant="ghost" className="text-destructive-foreground underline" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button>
+                 <Button variant="ghost" className="text-destructive-foreground underline" onClick={clearAll}>關閉</Button>
              </CardFooter>
          </Card>
       );
@@ -592,7 +735,7 @@ export default function CalorieLogger() {
              <CardDescription>記錄前請檢視並編輯詳細資訊。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Preview Image (compressed) */}
+            {/* Preview Image (cropped and compressed) */}
             {imageSrc && (
                  // Use aspect-video for consistent ratio, contain ensures full image visible
                 <div className="relative aspect-video w-full overflow-hidden rounded-md border mb-4 bg-muted/30">
@@ -721,7 +864,7 @@ export default function CalorieLogger() {
               {isLoading ? <LoadingSpinner size={16} className="mr-2"/> : <PlusCircle className="mr-2 h-4 w-4" />}
                記錄卡路里
             </Button>
-             <Button variant="outline" onClick={() => { setImageSrc(null); clearEstimation(); }} className="w-full sm:w-auto">
+             <Button variant="outline" onClick={clearAll} className="w-full sm:w-auto">
                 取消
             </Button>
           </CardFooter>
@@ -764,7 +907,56 @@ export default function CalorieLogger() {
              {/* Hidden canvas for capturing frame */}
             <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
 
-            {/* Image Preview (when image selected/taken but not yet processed or logged) */}
+             {/* Cropping Modal */}
+             <Dialog open={isCropping} onOpenChange={(open) => { if (!open) handleCropCancel(); }}>
+                  <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto"> {/* Adjust size and allow scroll */}
+                    <DialogHeader>
+                      <DialogTitle>裁切影像</DialogTitle>
+                      <DialogDescription>
+                        拖曳選框以裁切您的食物照片。
+                      </DialogDescription>
+                    </DialogHeader>
+                    {originalImageSrc && (
+                        <div className="my-4 flex justify-center"> {/* Center the cropper */}
+                           {/* Set a max-height for the image inside */}
+                            <ReactCrop
+                                crop={crop}
+                                onChange={(_, percentCrop) => setCrop(percentCrop)}
+                                onComplete={(c) => setCompletedCrop(c)}
+                                aspect={CROP_ASPECT}
+                                // minWidth={100} // Optional: minimum crop dimensions
+                                // minHeight={100}
+                                // ruleOfThirds // Optional: show rule of thirds grid
+                                // circularCrop // Optional: for circular crop
+                            >
+                                <img
+                                    ref={imgRef}
+                                    alt="裁切預覽"
+                                    src={originalImageSrc}
+                                    onLoad={onImageLoad}
+                                    style={{ maxHeight: '60vh', objectFit: 'contain' }} // Limit height
+                                    data-ai-hint="食物 盤子"
+                                />
+                            </ReactCrop>
+                        </div>
+                    )}
+                     {!originalImageSrc && <p>正在載入影像...</p>} {/* Placeholder while loading */}
+                    <DialogFooter>
+                       <DialogClose asChild>
+                        <Button type="button" variant="outline" onClick={handleCropCancel}>
+                            取消
+                        </Button>
+                       </DialogClose>
+                      <Button type="button" onClick={handleCropConfirm} disabled={!completedCrop?.width || !completedCrop?.height || isLoading}>
+                        {isLoading ? <LoadingSpinner size={16} className="mr-2"/> : <Crop className="mr-2 h-4 w-4" />}
+                         確認裁切
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+
+            {/* Image Preview (after crop/camera, before log) */}
             {!isCameraOpen && imageSrc && !estimationResult && !isLoading && !error && (
               <div className="relative aspect-video w-full overflow-hidden rounded-md border bg-muted/30">
                  <Image
@@ -777,14 +969,14 @@ export default function CalorieLogger() {
                     className="rounded-md"
                     priority={true} // Prioritize loading the preview image
                 />
-                 <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/30 hover:bg-black/50 text-white rounded-full" onClick={() => {setImageSrc(null); clearEstimation();}} aria-label="清除影像">
+                 <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/30 hover:bg-black/50 text-white rounded-full" onClick={clearAll} aria-label="清除影像">
                     <X size={18} />
                 </Button>
               </div>
             )}
 
              {/* Placeholder when no image, camera, or results and not loading/error */}
-             {!isCameraOpen && !imageSrc && !estimationResult && !isLoading && !error && (
+             {!isCameraOpen && !imageSrc && !estimationResult && !isLoading && !error && !isCropping && (
                  <div className="flex flex-col items-center justify-center h-40 border-2 border-dashed rounded-md text-muted-foreground bg-muted/50 p-4 text-center">
                      <ImageUp size={32} className="mb-2 opacity-50" /> {/* Changed Icon */}
                     <p>預覽畫面會顯示在此</p>
@@ -793,7 +985,7 @@ export default function CalorieLogger() {
             )}
 
              {/* Buttons area - Conditionally render based on state */}
-            {!isCameraOpen && !estimationResult && !isLoading && !error && (
+            {!isCameraOpen && !estimationResult && !isLoading && !error && !isCropping && (
                 <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
                     <Button onClick={openCamera} variant="outline" disabled={isLoading} className="w-full sm:w-auto">
                         <Camera className="mr-2 h-4 w-4" /> 開啟相機
@@ -805,7 +997,7 @@ export default function CalorieLogger() {
                     <Input
                         type="file"
                          accept="image/jpeg,image/png,image/webp,image/heic" // Specify accepted types
-                         capture="environment" // Hint for mobile camera (takes precedence over accept sometimes)
+                         // capture="environment" // Removing capture, let user choose upload/camera via buttons
                         ref={fileInputRef}
                         onChange={handleImageChange}
                         className="hidden"
@@ -815,24 +1007,24 @@ export default function CalorieLogger() {
             )}
 
             {/* Show loading state within this card */}
-             {isLoading && !isCameraOpen && ( // Show loading indicator when not in camera view
+             {isLoading && !isCameraOpen && !isCropping && ( // Show loading indicator when not in camera/cropping view
                 <div className="flex flex-col items-center justify-center p-6 space-y-2">
                     <LoadingSpinner size={32} />
                     <p className="text-muted-foreground">{loadingMessage || '正在處理...'}</p>
                 </div>
              )}
              {/* Show error here only if not showing the main estimation error card */}
-            {error && !estimationResult && !isCameraOpen && ( // Also hide if camera is open
+            {error && !estimationResult && !isCameraOpen && !isCropping && ( // Also hide if camera/cropping is open
                  <div className="mt-4 p-3 border border-destructive bg-destructive/10 rounded-md text-destructive-foreground text-sm flex justify-between items-center">
                     <p>{error}</p>
-                    <Button variant="ghost" size="sm" className="text-destructive-foreground underline p-0 h-auto hover:bg-transparent" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button>
+                    <Button variant="ghost" size="sm" className="text-destructive-foreground underline p-0 h-auto hover:bg-transparent" onClick={clearAll}>關閉</Button>
                  </div>
              )}
           </CardContent>
         </Card>
 
        {/* Render Estimation/Log Details Card - Show if we have a result OR if there was an error during estimation */}
-        { (estimationResult || (error && imageSrc)) && !isCameraOpen && renderEstimationResult()}
+        { (estimationResult || (error && imageSrc)) && !isCameraOpen && !isCropping && renderEstimationResult()}
 
 
       </div>
@@ -926,3 +1118,4 @@ export default function CalorieLogger() {
     </div>
   );
 }
+
