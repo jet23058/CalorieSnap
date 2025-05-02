@@ -346,10 +346,11 @@ export default function CalorieLogger() {
 
             // Safely add calories and amount, defaulting to 0 if invalid
             const calories = typeof entry.calorieEstimate === 'number' && !isNaN(entry.calorieEstimate) ? entry.calorieEstimate : 0;
-            const amount = typeof entry.amount === 'number' && !isNaN(entry.amount) ? entry.amount : 0;
+            const amountValue = typeof entry.amount === 'number' && !isNaN(entry.amount) ? entry.amount : 0;
+
 
             summaries[entryDate].totalCalories += calories;
-            summaries[entryDate].totalAmount += amount;
+            summaries[entryDate].totalAmount += amountValue;
             summaries[entryDate].entries.push(entry);
 
        } catch (dateError) {
@@ -802,7 +803,13 @@ export default function CalorieLogger() {
         toast({ title: "記錄錯誤", description: "請輸入有效的卡路里數值（非負整數）。", variant: "destructive" });
         return;
     }
-    const parsedAmount = parseFloat(amount); // Keep amount parsing as float
+     // Validate amount
+    const parsedAmount = amount === '' ? undefined : parseFloat(amount); // Allow empty string for amount
+    if (amount !== '' && (parsedAmount === undefined || isNaN(parsedAmount) || parsedAmount < 0)) {
+        toast({ title: "記錄錯誤", description: "請輸入有效的金額（非負數）。", variant: "destructive" });
+        return;
+    }
+
 
     // Check for imageSrc being present as it's now required for the log entry
     if (estimationResult && imageSrc) { // Use estimationResult for confidence, but edited values for others
@@ -817,18 +824,39 @@ export default function CalorieLogger() {
         imageUrl: imageSrc, // STORE the compressed image data URI
         location: location || undefined, // Use location from state
         mealType: mealType, // Use meal type from state
-        amount: !isNaN(parsedAmount) ? parsedAmount : undefined, // Use amount from state
+        amount: parsedAmount, // Use parsed amount (can be undefined)
       };
 
-      // Log the entry using the setCalorieLog setter which handles errors
-      // Error handling is now done within the custom hook via the error state
-      // No need for try-catch here, just call the setter.
-      // Limit the log size (e.g., keep only the latest 100 entries)
-      const MAX_LOG_ENTRIES = 100; // Keep this relatively low due to image data size
-      setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
+      try {
+        // Log the entry using the setCalorieLog setter which handles errors
+        // Error handling is now done within the custom hook via the error state
+        // No need for try-catch here, just call the setter.
+        // Limit the log size (e.g., keep only the latest 100 entries)
+        const MAX_LOG_ENTRIES = 50; // Reduced max entries due to image data size
+        setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
+        // Toast for success moved to useEffect to ensure state update and check for storage error
 
-      // Check storageError state after the potential update using useEffect
-      // (The check within useEffect is more reliable)
+      } catch (saveError) {
+        // Handle errors specifically thrown by useLocalStorage hook (if any)
+        // Note: The hook itself now uses internal error state, but catching here is a safeguard
+        console.error("Error explicitly caught while calling setCalorieLog:", saveError);
+        if (saveError instanceof LocalStorageError) {
+             toast({
+                title: "記錄儲存失敗",
+                description: saveError.message,
+                variant: "destructive",
+             });
+        } else {
+             toast({
+                title: "記錄儲存失敗",
+                description: "儲存卡路里記錄時發生未預期的錯誤。",
+                variant: "destructive",
+             });
+        }
+        // Important: Don't clear the form here, let the user retry or cancel
+        // clearAll(); // Avoid clearing on error
+      }
+
 
     } else {
          let errorDesc = "沒有可記錄的估計結果或影像。";
@@ -844,47 +872,63 @@ export default function CalorieLogger() {
   };
 
   // UseEffect to show success toast only after successful state update and no storage error
-  useEffect(() => {
-     // Check if a new entry was just potentially added (e.g., by comparing lengths or finding the last entry)
-     // This logic might need refinement depending on how you identify a 'just added' entry.
-     // For simplicity, we'll show the toast if there's no current storage error.
-     if (isClient && !storageError && !isLoading && estimationResult && imageSrc) {
-         // Check if the action that triggers logCalories has recently completed
-         // This is tricky without adding more state. A potential (but not perfect) way
-         // is to check if the estimationResult and imageSrc match the last added log entry.
-         // However, a simpler approach for now: assume if we get here without error, it was successful.
-         // We need to clear the state *after* the toast is shown, perhaps in another effect or delayed.
+   useEffect(() => {
+     // Only run this effect if the component is mounted on the client
+     if (!isClient) return;
 
-         // Find the potentially just added entry (assuming it's the first one after update)
-         const lastEntry = calorieLog[0];
-          if (lastEntry && lastEntry.imageUrl === imageSrc && lastEntry.foodItem === editedFoodItem.trim()) {
-              toast({
-                 title: "記錄成功",
-                 description: `${lastEntry.foodItem} (${lastEntry.calorieEstimate} 大卡) 已新增至您的記錄中。`,
-              });
-              // Now clear the input state
-              clearAll();
-          }
+     // Check if the log operation might have just completed (estimationResult and imageSrc are present)
+     // and there's no storage error currently.
+     if (!storageError && !isLoading && estimationResult && imageSrc) {
+       // Find the potentially just added entry (assuming it's the first one after update)
+       const lastEntry = calorieLog[0];
+
+       // Check if the last entry matches the data we *intended* to log.
+       // This is an approximation to detect if the log operation was the last state update.
+       if (lastEntry && lastEntry.imageUrl === imageSrc && lastEntry.foodItem === editedFoodItem.trim()) {
+         // Check if this toast hasn't been shown for this specific entry yet.
+         // We need a way to track this. A simple approach is to clear the source data
+         // *after* showing the toast, so this condition won't match again immediately.
+
+         // Show the success toast
+         toast({
+           title: "記錄成功",
+           description: `${lastEntry.foodItem} (${lastEntry.calorieEstimate} 大卡) 已新增至您的記錄中。`,
+         });
+
+         // Clear the form/input state *after* successfully logging and showing the toast.
+         clearAll();
+       }
      }
-     // Intentionally not depending on estimationResult, imageSrc, editedFoodItem to avoid infinite loops
-     // Depend on calorieLog and storageError
-  }, [calorieLog, storageError, isClient, toast]); // Removed isLoading, estimationResult, imageSrc, editedFoodItem
+     // Dependencies: calorieLog (to react to updates), storageError (to know if update failed),
+     // isClient (to ensure client-side execution), toast (for showing messages).
+     // We intentionally don't include estimationResult, imageSrc, editedFoodItem, isLoading
+     // to prevent running the effect excessively or causing loops. The check inside the effect
+     // handles the logic based on their current values when the log updates.
+   }, [calorieLog, storageError, isClient, toast]);
 
 
   const deleteLogEntry = (id: string) => {
-    // Error handling is now done within the custom hook via the error state
-    // No need for try-catch here, just call the setter.
-    setCalorieLog(calorieLog.filter(entry => entry.id !== id));
+    try {
+        // Error handling is now done within the custom hook via the error state
+        // No need for try-catch here, just call the setter.
+        setCalorieLog(calorieLog.filter(entry => entry.id !== id));
 
-    // Check storageError after update (similar caveat as in logCalories)
-    if (!storageError) {
-        toast({
-            title: "記錄項目已刪除",
-            description: "所選項目已從您的記錄中移除。",
-        });
-    } else {
-        console.error("Deleting from localStorage failed (detected immediately):", storageError);
-        // Toast is handled by the useEffect hook watching storageError
+        // Check storageError after update (similar caveat as in logCalories)
+        // The useEffect watching storageError will handle the error toast if needed.
+         if (!storageError) { // Show success only if no immediate error from the setter
+            toast({
+                title: "記錄項目已刪除",
+                description: "所選項目已從您的記錄中移除。",
+            });
+         }
+    } catch (deleteError) {
+        // Catch potential errors thrown by the setter (though unlikely with current hook setup)
+        console.error("Error explicitly caught while deleting log entry:", deleteError);
+        if (deleteError instanceof LocalStorageError) {
+             toast({ title: "刪除錯誤", description: deleteError.message, variant: "destructive" });
+        } else {
+            toast({ title: "刪除錯誤", description: "刪除記錄項目時發生未預期的錯誤。", variant: "destructive" });
+        }
     }
 };
 
@@ -917,7 +961,8 @@ export default function CalorieLogger() {
         setEditedEntryData(prev => ({ ...prev, [field]: (numValue !== undefined && !isNaN(numValue) && numValue >= 0) ? numValue : undefined }));
     } else if (field === 'amount') {
          const numValue = value === '' ? undefined : parseFloat(value as string);
-         setEditedEntryData(prev => ({ ...prev, [field]: (numValue !== undefined && !isNaN(numValue) && numValue >= 0) ? numValue : undefined }));
+         // Allow empty or non-negative numbers
+         setEditedEntryData(prev => ({ ...prev, [field]: (value === '' || (numValue !== undefined && !isNaN(numValue) && numValue >= 0)) ? numValue : prev.amount }));
     }
     else {
       setEditedEntryData(prev => ({ ...prev, [field]: value }));
@@ -962,42 +1007,49 @@ export default function CalorieLogger() {
          return;
      }
 
+    try {
+        // Error handling is now done within the custom hook via the error state
+        // No need for try-catch here, just call the setter.
+        setCalorieLog(prevLog =>
+            prevLog.map(entry =>
+                entry.id === id
+                    ? {
+                        ...entry, // Keep original confidence, id, imageUrl
+                        foodItem: editedEntryData.foodItem!.trim(),
+                        calorieEstimate: editedCalories, // Already validated number
+                        timestamp: editedTimestamp, // Use parsed timestamp
+                        location: editedEntryData.location || undefined, // Handle empty string for location
+                        mealType: editedEntryData.mealType,
+                        amount: editedAmount, // Already validated number or undefined
+                      }
+                    : entry
+            )
+        );
 
-    // Error handling is now done within the custom hook via the error state
-    // No need for try-catch here, just call the setter.
-    setCalorieLog(prevLog =>
-        prevLog.map(entry =>
-            entry.id === id
-                ? {
-                    ...entry, // Keep original confidence, id, imageUrl
-                    foodItem: editedEntryData.foodItem!.trim(),
-                    calorieEstimate: editedCalories, // Already validated number
-                    timestamp: editedTimestamp, // Use parsed timestamp
-                    location: editedEntryData.location || undefined, // Handle empty string for location
-                    mealType: editedEntryData.mealType,
-                    amount: editedAmount, // Already validated number or undefined
-                  }
-                : entry
-        )
-    );
-
-     // Check storageError after update (similar caveat as in logCalories)
-     if (!storageError) {
-        cancelEditing(); // Exit edit mode
-        toast({
-            title: "記錄已更新",
-            description: "項目已成功更新。",
-        });
-     } else {
-         console.error("Saving edited entry to localStorage failed (detected immediately):", storageError);
-         // Toast is handled by the useEffect hook watching storageError
-     }
+         // Check storageError after update (similar caveat as in logCalories)
+         // The useEffect watching storageError will handle the error toast if needed.
+         if (!storageError) { // Show success only if no immediate error from the setter
+            cancelEditing(); // Exit edit mode
+            toast({
+                title: "記錄已更新",
+                description: "項目已成功更新。",
+            });
+         }
+    } catch (saveError) {
+        // Catch potential errors thrown by the setter (though unlikely with current hook setup)
+         console.error("Error explicitly caught while saving edited entry:", saveError);
+         if (saveError instanceof LocalStorageError) {
+              toast({ title: "更新錯誤", description: saveError.message, variant: "destructive" });
+         } else {
+             toast({ title: "更新錯誤", description: "更新記錄項目時發生未預期的錯誤。", variant: "destructive" });
+         }
+    }
 
   };
   // --- End Edit Entry Functions ---
 
   // Handlers for User Profile Input
- const handleProfileChange = (field: keyof UserProfile, value: string | number | ActivityLevel | undefined) => {
+ const handleProfileChange = useCallback((field: keyof UserProfile, value: string | number | ActivityLevel | undefined) => {
     setUserProfile(prev => {
         const newProfile = { ...prev };
         let processedValue: number | ActivityLevel | undefined;
@@ -1023,7 +1075,7 @@ export default function CalorieLogger() {
 
         return prev; // Return previous state if no change
     });
- };
+ }, [setUserProfile]); // Add setUserProfile to dependency array
 
 
   const estimatedDailyNeeds = useMemo(() => calculateEstimatedNeeds(userProfile), [userProfile]);
@@ -1216,8 +1268,12 @@ export default function CalorieLogger() {
                             } else if (e.target.value !== '' && e.target.value !== '.') {
                                 // Clear invalid input on blur (optional)
                                 // setAmount('');
+                            } else if (e.target.value === '') {
+                                // Ensure empty string remains empty (no "0.00")
+                                setAmount('');
                             }
                         }}
+
                         placeholder="0.00"
                         className="pl-8" // Add padding for the icon
                         step="0.01" // Hint for browser controls
@@ -1234,7 +1290,12 @@ export default function CalorieLogger() {
             <Button
                 onClick={logCalories}
                 className="bg-primary text-primary-foreground hover:bg-primary/90 w-full sm:w-auto flex-1 sm:flex-none"
-                disabled={!editedFoodItem || !editedFoodItem.trim() || editedCalorieEstimate === '' || isNaN(parseInt(editedCalorieEstimate)) || parseInt(editedCalorieEstimate) < 0 || isLoading || !imageSrc} // Disable if no image, invalid name or calories
+                 disabled={
+                    !editedFoodItem || !editedFoodItem.trim() ||
+                    editedCalorieEstimate === '' || isNaN(parseInt(editedCalorieEstimate)) || parseInt(editedCalorieEstimate) < 0 ||
+                    (amount !== '' && (isNaN(parseFloat(amount)) || parseFloat(amount) < 0)) || // Validate amount here too
+                    isLoading || !imageSrc
+                 } // Disable if invalid data, loading, or no image
              >
               {isLoading ? <LoadingSpinner size={16} className="mr-2"/> : <PlusCircle className="mr-2 h-4 w-4" />}
                記錄卡路里
@@ -1677,7 +1738,7 @@ export default function CalorieLogger() {
                     <p>拍下食物照片開始記錄吧！</p>
                 </div>
               ) : (
-                <Accordion type="single" collapsible className="w-full space-y-4">
+                <Accordion type="single" collapsible className="w-full space-y-4" defaultValue="item-0"> {/* Default open first item */}
                    {dailySummaries.map((summary, index) => {
                        let summaryDate: Date | null = null;
                        try {
@@ -1702,7 +1763,7 @@ export default function CalorieLogger() {
                                     <div className="text-sm text-right">
                                       <p className="text-primary">
                                           {/* Safely display total calories */}
-                                         {typeof summary.totalCalories === 'number' && !isNaN(summary.totalCalories) ? summary.totalCalories : '??'} 大卡
+                                         {typeof summary.totalCalories === 'number' && !isNaN(summary.totalCalories) ? summary.totalCalories.toFixed(0) : '??'} 大卡
                                       </p>
                                       {summary.totalAmount > 0 && typeof summary.totalAmount === 'number' && !isNaN(summary.totalAmount) && (
                                           <p className="text-muted-foreground">{summary.totalAmount.toFixed(2)} 元</p>
