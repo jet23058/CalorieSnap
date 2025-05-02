@@ -17,7 +17,7 @@ import {
   Edit,
   Trash2,
   Bell,
-  BarChart,
+  BarChart, // Re-added, might be needed later
   ZoomIn,
   X,
   UploadCloud,
@@ -29,7 +29,9 @@ import {
   Settings,
   Apple,
   CalendarDays,
-  Trash // Added for deleting water entries
+  Trash, // Added for deleting water entries
+  Cat, // Added for achievement badge
+  Trophy, // Added for achievement section title
 } from 'lucide-react';
 import {
   Tabs,
@@ -48,10 +50,10 @@ import { useToast } from '@/hooks/use-toast';
 import { isValidDate, cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; // Removed SelectGroup, SelectLabel
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose, DialogDescription } from "@/components/ui/dialog"; // Import Dialog components
-import ReactCrop, { type Crop, centerCrop, makeAspectCrop } from 'react-image-crop';
+import ReactCrop, { type Crop, centerCrop } from 'react-image-crop'; // Removed makeAspectCrop
 import 'react-image-crop/dist/ReactCrop.css';
 import { Sheet, SheetTrigger } from '@/components/ui/sheet'; // Import Sheet components
 import { NotificationSettingsSheet, NotificationSettings, defaultSettings as defaultNotificationSettings } from '@/components/notification-settings-sheet'; // Import the new sheet component
@@ -67,7 +69,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Calendar } from "@/components/ui/calendar"; // Import Calendar component
-import { format, isSameDay, startOfDay } from 'date-fns'; // Import date-fns helpers
+import { format, isSameDay, startOfDay, subDays } from 'date-fns'; // Import date-fns helpers
 import { zhTW } from 'date-fns/locale'; // Import Traditional Chinese locale
 import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
 
@@ -179,7 +181,7 @@ const calculateRecommendedWater = (profile: UserProfile): number | null => {
 
 // Function to get current date as YYYY-MM-DD
 const getCurrentDate = (): string => {
-    return format(new Date(), 'yyyy-MM-dd'); // Use date-fns format
+    return format(startOfDay(new Date()), 'yyyy-MM-dd'); // Ensure it's just the date part
 };
 
 
@@ -197,7 +199,8 @@ export default function CalorieLogger() {
   // Updated waterLog state to store individual entries per day
   const [waterLog, setWaterLog, waterLogError] = useLocalStorage<Record<string, WaterLogEntry[]>>('waterLog', {}); // { 'YYYY-MM-DD': [WaterLogEntry, ...] }
   const [notificationSettings, setNotificationSettings, notificationSettingsError] = useLocalStorage<NotificationSettings>('notificationSettings', defaultNotificationSettings);
-  const [showDetails, setShowDetails] = useState<Record<string, boolean>>({}); // State to manage details visibility for each log entry
+  // Removed showDetails state as it's not used anymore
+  // const [showDetails, setShowDetails] = useState<Record<string, boolean>>({});
   const [editingEntry, setEditingEntry] = useState<CalorieLogEntry | null>(null); // State for the entry being edited
   const [isEditing, setIsEditing] = useState(false); // State to control the edit dialog
   const [showImageModal, setShowImageModal] = useState<string | null>(null); // State to control the image zoom modal
@@ -268,7 +271,8 @@ export default function CalorieLogger() {
       if (isClient) {
           fetchCurrentLocation();
       }
-  }, [fetchCurrentLocation, isClient]); // Depend on isClient
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isClient]); // Only depend on isClient to run once on mount
 
 
   useEffect(() => {
@@ -323,7 +327,8 @@ export default function CalorieLogger() {
               }
           }
       };
-  }, [toast, isClient]); // Depend on isClient
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isClient]); // Only depend on isClient
 
 
   // --- Crop Logic ---
@@ -331,7 +336,6 @@ export default function CalorieLogger() {
   function centerAspectCrop(
     mediaWidth: number,
     mediaHeight: number,
-    aspect: number | undefined, // Allow undefined for free crop
   ) {
       // Default to full image crop
        return centerCrop(
@@ -351,7 +355,7 @@ export default function CalorieLogger() {
   function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
     const { width, height } = e.currentTarget;
     // Center the crop area, defaulting to full image
-    const initialCrop = centerAspectCrop(width, height, undefined); // Always use undefined for full crop initially
+    const initialCrop = centerAspectCrop(width, height); // Always use undefined for full crop initially
     setCrop(initialCrop);
     setCompletedCrop(initialCrop); // Also set completed crop initially
   }
@@ -593,7 +597,7 @@ export default function CalorieLogger() {
           fileInputRef.current.value = ""; // Reset file input
         }
       } catch (storageError: any) {
-         // Handle errors, including the one thrown above
+         // Handle errors from useLocalStorage
          if (storageError instanceof LocalStorageError) {
              toast({
                  variant: 'destructive',
@@ -627,9 +631,10 @@ export default function CalorieLogger() {
       }
   };
 
-  const toggleDetails = (id: string) => {
-    setShowDetails(prev => ({ ...prev, [id]: !prev[id] }));
-  };
+  // Removed toggleDetails as it's not used anymore
+  // const toggleDetails = (id: string) => {
+  //   setShowDetails(prev => ({ ...prev, [id]: !prev[id] }));
+  // };
 
 
   const startEditing = (entry: CalorieLogEntry) => {
@@ -822,11 +827,11 @@ export default function CalorieLogger() {
 
 
   const resetTodaysWater = () => {
-      if (!isClient) return;
-      const today = getCurrentDate();
+      if (!isClient || !selectedDate) return;
+      const dateKey = format(selectedDate, 'yyyy-MM-dd');
       try {
-          setWaterLog(prevLog => ({ ...prevLog, [today]: [] })); // Reset to empty array
-          toast({ title: "已重設", description: "今日飲水量已重設。" });
+          setWaterLog(prevLog => ({ ...prevLog, [dateKey]: [] })); // Reset to empty array
+          toast({ title: "已重設", description: `${format(selectedDate, 'yyyy/MM/dd')} 飲水量已重設。` });
       } catch (storageError: any) {
           if (storageError instanceof LocalStorageError) {
               toast({ variant: 'destructive', title: '重設錯誤', description: storageError.message });
@@ -848,6 +853,17 @@ export default function CalorieLogger() {
 
    const currentRecommendedWater = recommendedWater ?? defaultWaterTarget; // Use default if null
    const waterProgress = currentRecommendedWater ? Math.min((selectedDateWaterIntake / currentRecommendedWater) * 100, 100) : 0;
+
+   // Calculate yesterday's water intake and achievement
+   const yesterdayWaterIntake = useMemo(() => {
+        if (!isClient) return 0;
+        const yesterdayDate = subDays(new Date(), 1);
+        const yesterdayKey = format(yesterdayDate, 'yyyy-MM-dd');
+        const entries = waterLog[yesterdayKey] || [];
+        return entries.reduce((total, entry) => total + entry.amount, 0);
+   }, [waterLog, isClient]);
+
+   const yesterdayWaterGoalMet = yesterdayWaterIntake >= currentRecommendedWater;
 
 
   // --- Rendering ---
@@ -1041,35 +1057,35 @@ export default function CalorieLogger() {
     return Array.from(daysWithLogs).map(dateStr => new Date(dateStr));
  }, [calorieLog, isClient]);
 
+
+ const renderStorageError = () => {
+    if (!isClient) return null; // Only render errors on client
+    const errorMessages = [
+        logError,
+        profileError,
+        waterLogError,
+        notificationSettingsError
+    ].filter(Boolean); // Filter out null errors
+
+     if (errorMessages.length === 0) return null;
+
+     // Display the first error encountered
+     const firstError = errorMessages[0];
+     let title = '儲存空間錯誤';
+     if (firstError === profileError) title = '設定檔儲存錯誤';
+     else if (firstError === waterLogError) title = '飲水記錄儲存錯誤';
+     else if (firstError === notificationSettingsError) title = '通知設定儲存錯誤';
+
+     return (
+         <Alert variant="destructive" className="my-4">
+             <Info className="h-4 w-4" />
+             <AlertTitle>{title}</AlertTitle>
+             <AlertDescription>{firstError?.message || '處理資料時發生錯誤。儲存空間可能已滿。'}</AlertDescription>
+         </Alert>
+     );
+ };
+
  const renderLogList = () => {
-     // Check for localStorage errors and display a persistent warning if needed
-     const renderStorageError = () => {
-        if (!isClient) return null; // Only render errors on client
-        const errorMessages = [
-            logError,
-            profileError,
-            waterLogError,
-            notificationSettingsError
-        ].filter(Boolean); // Filter out null errors
-
-         if (errorMessages.length === 0) return null;
-
-         // Display the first error encountered
-         const firstError = errorMessages[0];
-         let title = '儲存空間錯誤';
-         if (firstError === profileError) title = '設定檔儲存錯誤';
-         else if (firstError === waterLogError) title = '飲水記錄儲存錯誤';
-         else if (firstError === notificationSettingsError) title = '通知設定儲存錯誤';
-
-         return (
-             <Alert variant="destructive" className="my-4">
-                 <Info className="h-4 w-4" />
-                 <AlertTitle>{title}</AlertTitle>
-                 <AlertDescription>{firstError?.message || '處理資料時發生錯誤。儲存空間可能已滿。'}</AlertDescription>
-             </Alert>
-         );
-     };
-
     if (!isClient) {
         // Render placeholder or loading state on the server
         return (
@@ -1162,6 +1178,22 @@ export default function CalorieLogger() {
     );
 };
 
+ // Helper function to render water entries list
+ const renderWaterEntriesList = (entries: WaterLogEntry[]) => (
+    <div className="space-y-2 pt-4 border-t">
+        <h4 className="text-sm font-medium text-muted-foreground">今日飲水記錄：</h4>
+        <ul className="max-h-40 overflow-y-auto space-y-1 pr-2">
+            {entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map(entry => (
+                <li key={entry.id} className="flex items-center justify-between text-sm bg-muted/50 p-2 rounded">
+                    <span>{format(new Date(entry.timestamp), 'HH:mm')} - {entry.amount} 毫升</span>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => deleteWaterEntry(entry.id)} aria-label="刪除此飲水記錄" disabled={!isClient}>
+                        <Trash size={14} />
+                    </Button>
+                </li>
+            ))}
+        </ul>
+    </div>
+ );
 
 
  const renderWaterTracker = () => {
@@ -1226,46 +1258,35 @@ export default function CalorieLogger() {
                  </div>
 
                  {/* List of Today's Entries */}
-                 {selectedDateEntries.length > 0 && (
-                     <div className="space-y-2 pt-4 border-t">
-                        <h4 className="text-sm font-medium text-muted-foreground">今日飲水記錄：</h4>
-                         <ul className="max-h-40 overflow-y-auto space-y-1 pr-2">
-                             {selectedDateEntries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map(entry => ( // Sort by time descending
-                                 <li key={entry.id} className="flex items-center justify-between text-sm bg-muted/50 p-2 rounded">
-                                      <span>{format(new Date(entry.timestamp), 'HH:mm')} - {entry.amount} 毫升</span>
-                                       <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => deleteWaterEntry(entry.id)} aria-label="刪除此飲水記錄" disabled={!isClient}>
-                                           <Trash size={14} />
-                                       </Button>
-                                 </li>
-                             ))}
-                         </ul>
-                     </div>
-                 )}
+                 {selectedDateEntries.length > 0 && renderWaterEntriesList(selectedDateEntries)}
+
 
                  {/* Reset Button */}
-                 <div className="pt-4 border-t">
-                     <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                             <Button variant="destructive" size="sm" disabled={!isClient || selectedDateEntries.length === 0}>
-                               <RotateCw className="mr-1 h-4 w-4" /> 重設今日
-                             </Button>
-                         </AlertDialogTrigger>
-                         <AlertDialogContent>
-                            <AlertDialogHeader>
-                                <AlertDialogTitle>確定要重設今日飲水量嗎？</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                    這將刪除今日所有的飲水記錄。此操作無法復原。
-                                </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                                <AlertDialogCancel>取消</AlertDialogCancel>
-                                <AlertDialogAction onClick={resetTodaysWater}>
-                                    確認重設
-                                </AlertDialogAction>
-                            </AlertDialogFooter>
-                         </AlertDialogContent>
-                     </AlertDialog>
-                </div>
+                 {selectedDateEntries.length > 0 && (
+                     <div className="pt-4 border-t">
+                         <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                                 <Button variant="destructive" size="sm" disabled={!isClient}>
+                                   <RotateCw className="mr-1 h-4 w-4" /> 重設本日 ({format(selectedDate ?? new Date(), 'MM/dd')})
+                                 </Button>
+                             </AlertDialogTrigger>
+                             <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>確定要重設 {format(selectedDate ?? new Date(), 'yyyy/MM/dd')} 的飲水量嗎？</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        這將刪除所選日期的所有飲水記錄。此操作無法復原。
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>取消</AlertDialogCancel>
+                                    <AlertDialogAction onClick={resetTodaysWater}>
+                                        確認重設
+                                    </AlertDialogAction>
+                                </AlertDialogFooter>
+                             </AlertDialogContent>
+                         </AlertDialog>
+                    </div>
+                 )}
 
             </CardContent>
             <CardFooter className="text-xs text-muted-foreground">
@@ -1274,6 +1295,64 @@ export default function CalorieLogger() {
         </Card>
     );
  };
+
+ // New function to render the water summary and achievement card
+ const renderWaterSummary = () => {
+    const yesterdayKey = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+    const yesterdayTarget = calculateRecommendedWater({ ...userProfile, weight: userProfile.weight }) ?? defaultWaterTarget; // Recalculate target based on profile *at that time* might be complex, use current for simplicity
+
+    const getAchievementBadge = () => {
+        if (yesterdayWaterGoalMet) {
+            return (
+                <div className="text-center">
+                    <Cat size={60} className="mx-auto text-yellow-500 drop-shadow-lg" />
+                    <p className="mt-2 font-semibold text-primary">水分充足貓！</p>
+                    <p className="text-xs text-muted-foreground">昨天達成喝水目標！</p>
+                </div>
+            );
+        } else {
+             return (
+                 <div className="text-center">
+                     <Cat size={60} className="mx-auto text-muted-foreground opacity-50" />
+                     <p className="mt-2 font-semibold text-muted-foreground">再接再厲貓</p>
+                     <p className="text-xs text-muted-foreground">昨天未達成目標。今天加油！</p>
+                 </div>
+             );
+        }
+    };
+
+    return (
+        <Card className="mt-6 shadow-md">
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                    <Trophy size={24} className="text-yellow-600" /> 飲水成就
+                </CardTitle>
+                <CardDescription>看看您昨天的喝水表現！</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4 items-center">
+                    {/* Yesterday's Stats */}
+                    <div className="text-center border-r pr-4">
+                         <p className="text-xs text-muted-foreground">昨日 ({format(subDays(new Date(), 1), 'MM/dd')})</p>
+                        <p className="text-2xl font-bold text-blue-600">{yesterdayWaterIntake} <span className="text-sm font-normal">毫升</span></p>
+                        <p className="text-xs text-muted-foreground">目標：{yesterdayTarget} 毫升</p>
+                        <Progress
+                           value={yesterdayTarget > 0 ? Math.min((yesterdayWaterIntake / yesterdayTarget) * 100, 100) : 0}
+                           className="h-2 mt-2"
+                           aria-label={`昨日飲水進度 ${Math.round(yesterdayTarget > 0 ? (yesterdayWaterIntake / yesterdayTarget) * 100 : 0)}%`}
+                        />
+                    </div>
+                    {/* Achievement Badge */}
+                    {getAchievementBadge()}
+                </div>
+            </CardContent>
+             <CardFooter className="text-xs text-muted-foreground">
+                 持續追蹤，養成喝水好習慣！ <Cat size={14} className="inline-block ml-1 text-primary" />
+             </CardFooter>
+        </Card>
+    );
+ };
+
 
  const renderProfileStats = () => (
     <Card className="mt-6 shadow-md">
@@ -1650,16 +1729,22 @@ export default function CalorieLogger() {
   return (
     <Dialog> {/* Main Dialog wrapper for modals */}
         <Tabs defaultValue="logging" className="w-full">
-             <TabsList className="grid w-full grid-cols-3 sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
+             <TabsList className="grid w-full grid-cols-4 sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b"> {/* Changed to 4 columns */}
                  <TabsTrigger value="logging" className="flex-1 text-center px-1">
                      <Camera className="mr-1 sm:mr-2 h-4 w-4 inline-block" />
                      <span className="truncate hidden sm:inline">拍照記錄 & 摘要</span>
                      <span className="truncate sm:hidden">記錄</span>
                  </TabsTrigger>
                  <TabsTrigger value="tracking" className="flex-1 text-center px-1">
-                     <Droplet className="mr-1 sm:mr-2 h-4 w-4 inline-block" />
-                     <span className="truncate hidden sm:inline">飲水 & 資料</span>
-                     <span className="truncate sm:hidden">資料</span>
+                     <Droplet className="mr-1 sm:mr-2 h-4 w-4 inline-block text-blue-500" />
+                     <span className="truncate hidden sm:inline">飲水追蹤</span>
+                     <span className="truncate sm:hidden">飲水</span>
+                 </TabsTrigger>
+                 {/* New Tab for Water Summary */}
+                 <TabsTrigger value="summary" className="flex-1 text-center px-1">
+                     <Trophy className="mr-1 sm:mr-2 h-4 w-4 inline-block text-yellow-600" />
+                     <span className="truncate hidden sm:inline">飲水成就</span>
+                     <span className="truncate sm:hidden">成就</span>
                  </TabsTrigger>
                  <TabsTrigger value="settings" className="flex-1 text-center px-1">
                      <Settings className="mr-1 sm:mr-2 h-4 w-4 inline-block" />
@@ -1752,13 +1837,20 @@ export default function CalorieLogger() {
 
             </TabsContent>
 
-             {/* Tab 2: Water Tracking & Profile Stats */}
+             {/* Tab 2: Water Tracking */}
             <TabsContent value="tracking" className="pt-4">
                 {renderWaterTracker()}
-                {renderProfileStats()}
+                 {/* Removed profile stats from this tab */}
+                 {/* {renderProfileStats()} */}
             </TabsContent>
 
-             {/* Tab 3: Settings */}
+            {/* Tab 3: Water Summary */}
+            <TabsContent value="summary" className="pt-4">
+                 {renderWaterSummary()}
+                 {/* You might add other summaries here, e.g., calorie summary */}
+            </TabsContent>
+
+             {/* Tab 4: Settings */}
              <TabsContent value="settings" className="pt-4">
                  {renderProfileEditor()}
                  {renderNotificationSettingsTrigger()}
@@ -1773,5 +1865,4 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
-
 
