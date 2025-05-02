@@ -464,7 +464,7 @@ export default function CalorieLogger() {
 
   const handleCropConfirm = async () => {
     if (completedCrop?.width && completedCrop?.height && imgRef.current) {
-        setIsLoading(true); // Show loading spinner
+        setIsLoading(true); // Show loading indicator
         setError(null);
         setEstimation(null); // Clear previous estimation
 
@@ -1199,15 +1199,19 @@ export default function CalorieLogger() {
 
  // Filter logs based on view mode and selected date/month
  const filteredLog = useMemo(() => {
-     if (!selectedDate) return [];
+     if (!selectedDate || !isClient) return []; // Ensure client-side and selectedDate exists
 
      let logsToDisplay: CalorieLogEntry[];
 
      if (logViewMode === 'daily') {
          logsToDisplay = calorieLog.filter(entry => {
              if (!entry || !entry.timestamp) return false;
-             const entryDate = new Date(entry.timestamp);
-             return isValidDate(entryDate) && isSameDay(entryDate, selectedDate);
+             try {
+                 const entryDate = new Date(entry.timestamp);
+                 return isValidDate(entryDate) && isSameDay(entryDate, selectedDate);
+             } catch {
+                 return false; // Invalid date string
+             }
          });
          // Daily view always sorts by time descending
          logsToDisplay.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -1216,9 +1220,13 @@ export default function CalorieLogger() {
          const monthStart = startOfMonth(selectedDate);
          const monthEnd = endOfMonth(selectedDate);
          logsToDisplay = calorieLog.filter(entry => {
-             if (!entry || !entry.timestamp) return false;
-             const entryDate = new Date(entry.timestamp);
-             return isValidDate(entryDate) && isWithinInterval(entryDate, { start: monthStart, end: monthEnd });
+              if (!entry || !entry.timestamp) return false;
+              try {
+                 const entryDate = new Date(entry.timestamp);
+                 return isValidDate(entryDate) && isWithinInterval(entryDate, { start: monthStart, end: monthEnd });
+               } catch {
+                   return false; // Invalid date string
+               }
          });
 
          // Apply monthly sorting
@@ -1241,7 +1249,7 @@ export default function CalorieLogger() {
 
      return logsToDisplay;
 
- }, [calorieLog, selectedDate, logViewMode, monthlySortCriteria]);
+ }, [calorieLog, selectedDate, logViewMode, monthlySortCriteria, isClient]);
 
 
  // Get dates with calorie logs for calendar highlighting
@@ -1250,8 +1258,12 @@ export default function CalorieLogger() {
     const days = new Set<string>();
     calorieLog.forEach(entry => {
         if (entry?.timestamp) {
-            const date = startOfDay(new Date(entry.timestamp));
-            if (isValidDate(date)) days.add(format(date, 'yyyy-MM-dd'));
+            try {
+                const date = startOfDay(new Date(entry.timestamp));
+                if (isValidDate(date)) days.add(format(date, 'yyyy-MM-dd'));
+            } catch {
+                // Ignore entries with invalid timestamps
+            }
         }
     });
     return Array.from(days).map(dateStr => new Date(dateStr));
@@ -1262,7 +1274,14 @@ export default function CalorieLogger() {
     if (!isClient) return [];
     return Object.keys(waterLog)
         .filter(dateKey => waterLog[dateKey]?.length > 0)
-        .map(dateKey => new Date(dateKey));
+        .map(dateKey => {
+            try {
+                return new Date(dateKey);
+            } catch {
+                return null; // Invalid date key
+            }
+        })
+        .filter(isValidDate); // Filter out nulls and invalid dates
  }, [waterLog, isClient]);
 
 
@@ -1975,8 +1994,17 @@ export default function CalorieLogger() {
             </div>
         )}
         <DialogFooter className="flex-col sm:flex-row gap-2">
-           <Button variant="outline" onClick={() => setIsCropping(false)} className="w-full sm:w-auto">取消</Button>
-           <Button onClick={handleCropConfirm} className="w-full sm:w-auto">確認裁切</Button>
+           <Button variant="outline" onClick={() => setIsCropping(false)} className="w-full sm:w-auto" disabled={isLoading}>取消</Button>
+           <Button onClick={handleCropConfirm} className="w-full sm:w-auto" disabled={isLoading}>
+               {isLoading ? (
+                   <>
+                       <LoadingSpinner size={16} className="mr-2" />
+                       裁切中請稍後...
+                   </>
+               ) : (
+                   '確認裁切'
+               )}
+           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -2224,7 +2252,7 @@ export default function CalorieLogger() {
                         </div>
 
                         {/* Loading and Error States */}
-                        {isLoading && (
+                        {isLoading && estimation === null && ( // Only show general loading when no prior estimation exists
                             <div className="mt-4 flex justify-center items-center gap-2 text-primary">
                                 <LoadingSpinner />
                                 <span>正在估算卡路里...</span>
@@ -2272,3 +2300,5 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
+
+    
