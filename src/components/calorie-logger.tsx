@@ -28,20 +28,21 @@ const mealTypeTranslations: Record<MealType, string> = {
 };
 
 
-// Interface for the data stored in localStorage - remove imageUrl
+// Interface for the data stored in localStorage - re-add imageUrl
 interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem'> {
   id: string;
   timestamp: number;
-  // imageUrl: string; // Removed to save space
+  imageUrl: string; // Re-added to store the compressed image data URI
   foodItem: string; // Editable food item name
   location?: string; // Optional location
   mealType?: MealType; // Meal type
   amount?: number; // Optional amount/cost
 }
 
-// Interface used within the component (can include transient data like imageUrl)
+// Interface used within the component (can include transient data, but now mirrors storage)
+// Not strictly needed if LogEntryStorage has everything, but kept for consistency for now.
 interface LogEntryDisplay extends LogEntryStorage {
-    imageUrl?: string; // Keep for potential display if needed elsewhere, but not stored
+    // No additional fields needed currently
 }
 
 // Compression settings
@@ -156,7 +157,7 @@ function getCroppedImg(
 
 export default function CalorieLogger() {
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null); // For cropper
-  const [imageSrc, setImageSrc] = useState<string | null>(null); // For preview after crop/compress
+  const [imageSrc, setImageSrc] = useState<string | null>(null); // For preview after crop/compress AND storing
   const [estimationResult, setEstimationResult] = useState<EstimateCalorieCountOutput | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState<string>(''); // For specific loading messages
@@ -312,7 +313,7 @@ export default function CalorieLogger() {
           completedCrop
         );
 
-        setImageSrc(croppedDataUrl); // Set the final preview image
+        setImageSrc(croppedDataUrl); // Set the final preview image AND the image to be stored
         setOriginalImageSrc(null); // Clear original image source to free memory
         setLoadingMessage('正在估計卡路里...');
         await estimateCalories(croppedDataUrl); // Start estimation
@@ -475,7 +476,7 @@ export default function CalorieLogger() {
 
 
         // Successfully captured and compressed image
-        setImageSrc(dataUri); // Set final preview directly (no cropping for camera yet)
+        setImageSrc(dataUri); // Set final preview AND the image to be stored
         closeCamera(); // Close camera after taking picture
         setLoadingMessage('正在估計卡路里...'); // Update message
         estimateCalories(dataUri); // Start estimation with compressed image
@@ -509,7 +510,7 @@ export default function CalorieLogger() {
   }
 
   const clearAll = () => {
-      setImageSrc(null);
+      setImageSrc(null); // Clear the stored image source as well
       setOriginalImageSrc(null);
       clearEstimation();
       setIsCameraOpen(false);
@@ -523,7 +524,7 @@ export default function CalorieLogger() {
     // setIsLoading(true) is likely already true from handleImageChange or takePicture
     setLoadingMessage('正在估計卡路里...'); // Ensure message is correct
     setError(null);
-    // Keep existing imageSrc (compressed preview)
+    // Keep existing imageSrc (compressed preview / image to be stored)
     // setEstimationResult(null); // Already cleared in callers
 
     try {
@@ -576,10 +577,10 @@ export default function CalorieLogger() {
   }, [toast, fetchCurrentLocation]); // Added fetchCurrentLocation dependency
 
   const logCalories = () => {
-    // No longer need imageSrc check here as it's not stored
-    if (estimationResult && editedFoodItem && editedFoodItem.trim()) { // Ensure editedFoodItem is not empty or just whitespace
+    // Check for imageSrc being present as it's now required for the log entry
+    if (estimationResult && editedFoodItem && editedFoodItem.trim() && imageSrc) {
       const parsedAmount = parseFloat(amount);
-      // Create entry based on the storage interface (no imageUrl)
+      // Create entry based on the storage interface (now includes imageUrl)
       const newLogEntry: LogEntryStorage = {
         // Spread only the properties needed for storage
         calorieEstimate: estimationResult.calorieEstimate,
@@ -588,21 +589,21 @@ export default function CalorieLogger() {
         foodItem: editedFoodItem.trim(), // Use the trimmed edited name
         id: Date.now().toString(),
         timestamp: Date.now(),
-        // imageUrl: imageSrc, // DO NOT STORE IMAGE URL
+        imageUrl: imageSrc, // STORE the compressed image data URI
         location: location || undefined, // Use location from state
         mealType: mealType, // Use meal type from state
         amount: !isNaN(parsedAmount) ? parsedAmount : undefined, // Use amount from state
       };
 
-      // Log the entry without the image data
+      // Log the entry
       try {
           // Limit the log size (e.g., keep only the latest 100 entries)
-          const MAX_LOG_ENTRIES = 100;
+          const MAX_LOG_ENTRIES = 100; // Keep this relatively low due to image data size
           const updatedLog = [newLogEntry, ...calorieLog].slice(0, MAX_LOG_ENTRIES);
           setCalorieLog(updatedLog);
 
           // Clear the current image and results/fields after logging
-          clearAll(); // Use the new clearAll function
+          clearAll(); // Use the clearAll function
           toast({
               title: "記錄成功",
               description: `${newLogEntry.foodItem} (${estimationResult.calorieEstimate} 大卡) 已新增至您的記錄中。`,
@@ -618,29 +619,9 @@ export default function CalorieLogger() {
                     variant: "destructive",
                      duration: 7000,
                 });
-               // Optionally: Attempt to clear older entries if quota is exceeded - Be cautious with automatic deletion
-                // console.warn("LocalStorage 配額已滿。嘗試清除較舊的項目...");
-                // try {
-                //     const MAX_LOG_ENTRIES = 100;
-                //     const trimmedLog = calorieLog.slice(0, Math.floor(MAX_LOG_ENTRIES * 0.8)); // Keep 80%
-                //     setCalorieLog([newLogEntry, ...trimmedLog].slice(0, MAX_LOG_ENTRIES)); // Retry adding the new entry
-                //       toast({
-                //           title: "記錄成功 (已清除儲存空間)",
-                //           description: `已清除較舊的項目以騰出空間。已新增 ${newLogEntry.foodItem}。`,
-                //           variant: 'default',
-                //           duration: 6000,
-                //       });
-                //       setImageSrc(null);
-                //       clearEstimation();
-                // } catch (finalError) {
-                //     console.error("即使清除後仍無法儲存:", finalError);
-                //     // Restore original state maybe?
-                //      toast({
-                //          title: "記錄錯誤",
-                //          description: "即使清除空間後仍無法儲存項目。請手動清除部分記錄。",
-                //          variant: "destructive",
-                //      });
-                // }
+               // Consider adding a button/action to manually clear older entries
+               // Automatic deletion can be risky, especially with image data.
+               // Example: Provide a button in the UI to "Clear Oldest 10 Entries"
            } else {
                // Handle other potential errors during setCalorieLog or JSON stringify
                 toast({
@@ -652,9 +633,15 @@ export default function CalorieLogger() {
       }
 
     } else {
+         let errorDesc = "沒有可記錄的估計結果。";
+         if (!editedFoodItem || !editedFoodItem.trim()) {
+             errorDesc = "食物品項名稱不可為空。";
+         } else if (!imageSrc) {
+             errorDesc = "缺少影像資料無法記錄。"; // Add check for missing image
+         }
          toast({
             title: "記錄錯誤",
-            description: !editedFoodItem || !editedFoodItem.trim() ? "食物品項名稱不可為空。" : "沒有可記錄的估計結果。",
+            description: errorDesc,
             variant: "destructive",
          });
     }
@@ -681,9 +668,9 @@ export default function CalorieLogger() {
 
   const triggerFileInput = () => {
      // Clear previous image src if user clicks upload again
-     setImageSrc(null); // Optional: Decide if you want to clear preview immediately
+     setImageSrc(null); // Clear the image to be stored/previewed
      setOriginalImageSrc(null); // Clear original too
-     clearEstimation(); // Optional: Clear results too?
+     clearEstimation(); // Clear results
     fileInputRef.current?.click();
   };
 
@@ -860,7 +847,7 @@ export default function CalorieLogger() {
           </CardContent>
           <CardFooter className="flex-col sm:flex-row gap-2 pt-4"> {/* Add padding top */}
              {/* Make Log button more prominent */}
-            <Button onClick={logCalories} className="bg-primary text-primary-foreground hover:bg-primary/90 w-full sm:w-auto flex-1 sm:flex-none" disabled={!editedFoodItem || !editedFoodItem.trim() || isLoading}>
+            <Button onClick={logCalories} className="bg-primary text-primary-foreground hover:bg-primary/90 w-full sm:w-auto flex-1 sm:flex-none" disabled={!editedFoodItem || !editedFoodItem.trim() || isLoading || !imageSrc}> {/* Disable if no image */}
               {isLoading ? <LoadingSpinner size={16} className="mr-2"/> : <PlusCircle className="mr-2 h-4 w-4" />}
                記錄卡路里
             </Button>
@@ -1047,13 +1034,34 @@ export default function CalorieLogger() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Map over LogEntryStorage, not LogEntryDisplay */}
+                  {/* Map over LogEntryStorage, which now includes imageUrl */}
                   {calorieLog.map((entry, index) => ( // Add index
                     <React.Fragment key={entry.id}> {/* Use Fragment */}
                       <div className="flex items-start space-x-4">
-                        {/* Placeholder for Image */}
-                         <div className="w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0"> {/* Fixed size */}
-                           <ImageOff size={32} aria-label="無可用影像"/>
+                        {/* Display Image or Placeholder */}
+                         <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden"> {/* Fixed size and overflow hidden */}
+                            {entry.imageUrl ? (
+                                <Image
+                                    src={entry.imageUrl}
+                                    alt={`記錄項目：${entry.foodItem}`}
+                                    fill // Use fill to cover the container
+                                    sizes="(max-width: 640px) 4rem, 5rem" // Provide sizes hint
+                                    style={{ objectFit: 'cover' }} // Cover the area
+                                    className="rounded-md"
+                                    data-ai-hint="食物 盤子"
+                                    // Consider adding loading="lazy" for log images
+                                    loading="lazy"
+                                    // Add error handling for images that might fail to load (e.g., if data URI is corrupted)
+                                    onError={(e) => {
+                                        // Optionally replace with placeholder on error
+                                        (e.target as HTMLImageElement).src = ''; // Clear src
+                                        (e.target as HTMLImageElement).style.display = 'none'; // Hide broken image icon
+                                        // You might want to show the ImageOff icon here instead programmatically
+                                    }}
+                                />
+                            ) : (
+                               <ImageOff size={32} aria-label="無可用影像"/>
+                            )}
                         </div>
 
                         <div className="flex-1 space-y-1 overflow-hidden"> {/* Prevent text overflow */}
