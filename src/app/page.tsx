@@ -4,10 +4,10 @@ export default function Home() {
   return (
     <main className="container mx-auto p-4 md:p-8">
       <h1 className="text-3xl font-bold mb-6 text-center text-primary">
-        CalorieSnap
+        卡路里快拍 {/* Translated */}
       </h1>
       <p className="text-center text-muted-foreground mb-8">
-        Take a picture of your food to estimate its calorie count and log your meals.
+        拍下您的食物照片，估算其卡路里並記錄您的餐點。 {/* Translated */}
       </p>
       <CalorieLogger />
     </main>
