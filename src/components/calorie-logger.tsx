@@ -695,8 +695,8 @@ export default function CalorieLogger() {
                toast({ variant: 'destructive', title: '無效日期', description: '請輸入有效的日期和時間。' });
            }
        }
-       // Handle meal type selection where empty string means null
-       else if (field === 'mealType' && value === '') {
+       // Handle meal type selection where "none" means null
+       else if (field === 'mealType' && value === 'none') {
            processedValue = null;
        }
 
@@ -765,12 +765,20 @@ export default function CalorieLogger() {
           }
       }
       // Ensure activityLevel is one of the valid keys or null
-      if (field === 'activityLevel' && value !== null && !(value in activityLevelMultipliers)) {
-          processedValue = null;
+      if (field === 'activityLevel') {
+         if (value === 'none') {
+             processedValue = null;
+         } else if (value !== null && !(value in activityLevelMultipliers)) {
+              processedValue = null; // Or maybe keep previous value? For now, nullify.
+         }
       }
       // Ensure gender is one of the valid options or null
-      if (field === 'gender' && value !== null && !['male', 'female', 'other'].includes(value)) {
-          processedValue = null;
+      if (field === 'gender') {
+          if (value === 'none') {
+              processedValue = null;
+          } else if (value !== null && !['male', 'female', 'other'].includes(value)) {
+             processedValue = null;
+          }
       }
 
        try {
@@ -1271,10 +1279,15 @@ export default function CalorieLogger() {
                          modifiers={{
                              calorieLogged: calorieLoggedDays,
                              waterLogged: waterLoggedDays,
+                             selected: selectedDate ? [selectedDate] : [], // Ensure selected date is visually marked
                          }}
                          modifiersStyles={{
-                             calorieLogged: { fontWeight: 'bold' }, // Removed color override
+                             calorieLogged: { fontWeight: 'bold' },
                              waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
+                             selected: { // Style for selected date
+                                backgroundColor: 'hsl(var(--primary))',
+                                color: 'hsl(var(--primary-foreground))',
+                             },
                          }}
                          captionLayout="dropdown-buttons" // Use dropdowns for easier navigation
                          fromYear={2020} // Example start year
@@ -1293,10 +1306,15 @@ export default function CalorieLogger() {
                          modifiers={{
                              calorieLogged: calorieLoggedDays,
                              waterLogged: waterLoggedDays,
+                             selected: selectedDate ? [selectedDate] : [], // Ensure selected date is visually marked
                          }}
                          modifiersStyles={{
-                             calorieLogged: { fontWeight: 'bold' }, // Removed color override
+                             calorieLogged: { fontWeight: 'bold' },
                              waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
+                             selected: { // Style for selected date
+                                backgroundColor: 'hsl(var(--primary))',
+                                color: 'hsl(var(--primary-foreground))',
+                             },
                          }}
                          captionLayout="dropdown-buttons" // Use dropdowns for month/year
                          fromYear={2020} // Example start year
@@ -1727,14 +1745,14 @@ export default function CalorieLogger() {
                              餐別
                          </Label>
                           <Select
-                             value={editingEntry.mealType || ''}
-                             onValueChange={(value) => handleEditChange('mealType', value)} // Pass value directly
+                             value={editingEntry.mealType || 'none'} // Use 'none' for null value
+                             onValueChange={(value) => handleEditChange('mealType', value)}
                          >
                              <SelectTrigger id="edit-mealType" className="col-span-3">
                                  <SelectValue placeholder="選擇餐別 (選填)" />
                              </SelectTrigger>
                              <SelectContent>
-                                  <SelectItem value="">-- 無 --</SelectItem> {/* Option for null */}
+                                  <SelectItem value="none">-- 無 --</SelectItem> {/* Option for null */}
                                  <SelectItem value="Breakfast">{mealTypeTranslations['Breakfast']}</SelectItem>
                                  <SelectItem value="Lunch">{mealTypeTranslations['Lunch']}</SelectItem>
                                  <SelectItem value="Dinner">{mealTypeTranslations['Dinner']}</SelectItem>
@@ -1896,7 +1914,7 @@ export default function CalorieLogger() {
                  <div className="space-y-1">
                      <Label htmlFor="gender">生理性別</Label>
                       <Select
-                         value={userProfile.gender || ''}
+                         value={userProfile.gender || 'none'} // Use 'none' for null value
                          onValueChange={(value) => handleProfileChange('gender', value)}
                          disabled={!isClient} // Disable on server
                       >
@@ -1904,7 +1922,7 @@ export default function CalorieLogger() {
                              <SelectValue placeholder="選取生理性別" />
                          </SelectTrigger>
                          <SelectContent>
-                              <SelectItem value="">-- 未設定 --</SelectItem>
+                              <SelectItem value="none">-- 未設定 --</SelectItem>
                              <SelectItem value="male">男性</SelectItem>
                              <SelectItem value="female">女性</SelectItem>
                              <SelectItem value="other">其他</SelectItem>
@@ -1942,7 +1960,7 @@ export default function CalorieLogger() {
                  <div className="space-y-1 sm:col-span-2">
                      <Label htmlFor="activityLevel">活動水平</Label>
                      <Select
-                         value={userProfile.activityLevel || ''}
+                         value={userProfile.activityLevel || 'none'} // Use 'none' for null value
                          onValueChange={(value) => handleProfileChange('activityLevel', value)}
                          disabled={!isClient} // Disable on server
                      >
@@ -1950,7 +1968,7 @@ export default function CalorieLogger() {
                              <SelectValue placeholder="選取您的活動水平" />
                          </SelectTrigger>
                          <SelectContent>
-                              <SelectItem value="">-- 未設定 --</SelectItem>
+                              <SelectItem value="none">-- 未設定 --</SelectItem>
                              {Object.entries(activityLevelTranslations).map(([key, label]) => (
                                 <SelectItem key={key} value={key}>{label}</SelectItem>
                              ))}
