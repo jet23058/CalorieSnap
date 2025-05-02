@@ -844,12 +844,13 @@ export default function CalorieLogger() {
       };
 
       try {
-        // Log the entry using the setCalorieLog setter which handles errors
-        // Error handling is now done within the custom hook via the error state
-        // No need for try-catch here, just call the setter.
-        // Limit the log size (e.g., keep only the latest 100 entries)
-        const MAX_LOG_ENTRIES = 10; // Limit entries to avoid quota errors - significantly reduced
-        setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
+        // Limit the log size (e.g., keep only the latest N entries)
+        const MAX_LOG_ENTRIES = 100; // Increase limit slightly if needed, but keep it reasonable
+        setCalorieLog(prevLog => {
+           // Ensure prevLog is an array before spreading
+           const currentLog = Array.isArray(prevLog) ? prevLog : [];
+           return [newLogEntry, ...currentLog].slice(0, MAX_LOG_ENTRIES);
+        });
         // Toast for success moved to useEffect to ensure state update and check for storage error
 
       } catch (saveError) {
@@ -925,9 +926,11 @@ export default function CalorieLogger() {
 
   const deleteLogEntry = (id: string) => {
     try {
-        // Error handling is now done within the custom hook via the error state
-        // No need for try-catch here, just call the setter.
-        setCalorieLog(prevLog => prevLog.filter(entry => entry.id !== id)); // Use functional update
+        // Ensure setCalorieLog works with potentially non-array initial state
+        setCalorieLog(prevLog => {
+           const currentLog = Array.isArray(prevLog) ? prevLog : [];
+           return currentLog.filter(entry => entry.id !== id);
+        });
 
         // Check storageError after update (similar caveat as in logCalories)
         // The useEffect watching storageError will handle the error toast if needed.
@@ -1024,10 +1027,10 @@ export default function CalorieLogger() {
      }
 
     try {
-        // Error handling is now done within the custom hook via the error state
-        // No need for try-catch here, just call the setter.
-        setCalorieLog(prevLog =>
-            prevLog.map(entry =>
+         // Ensure setCalorieLog works with potentially non-array initial state
+        setCalorieLog(prevLog => {
+            const currentLog = Array.isArray(prevLog) ? prevLog : [];
+            return currentLog.map(entry =>
                 entry.id === id
                     ? {
                         ...entry, // Keep original confidence, id, imageUrl
@@ -1039,8 +1042,8 @@ export default function CalorieLogger() {
                         amount: editedAmount, // Already validated number or undefined
                       }
                     : entry
-            )
-        );
+            );
+        });
 
          // Check storageError after update (similar caveat as in logCalories)
          // The useEffect watching storageError will handle the error toast if needed.
@@ -1066,8 +1069,12 @@ export default function CalorieLogger() {
 
   // Handlers for User Profile Input - Using useCallback with dependency on setUserProfile
  const handleProfileChange = useCallback((field: keyof UserProfile, value: string | ActivityLevel | undefined) => {
+     if (!isClient) return; // Do nothing server-side
+
     setUserProfile(prev => {
-        const newProfile = { ...prev };
+        // Ensure prev is an object, default to empty if not
+        const currentProfile = typeof prev === 'object' && prev !== null ? prev : {};
+        const newProfile = { ...currentProfile };
         let processedValue: number | ActivityLevel | undefined;
 
         if (field === 'height' || field === 'weight') {
@@ -1077,7 +1084,7 @@ export default function CalorieLogger() {
             const validLevels = Object.keys(activityLevelTranslations);
             processedValue = validLevels.includes(value as string) ? (value as ActivityLevel) : undefined;
         } else {
-             return prev;
+             return prev; // Return original state if field is unknown
         }
 
         // Check if the value actually changed before updating
@@ -1087,7 +1094,7 @@ export default function CalorieLogger() {
         }
         return prev; // No change, return previous state
     });
- }, [setUserProfile]); // Dependency added
+ }, [setUserProfile, isClient]); // Added isClient dependency
 
 
   const estimatedDailyNeeds = useMemo(() => calculateEstimatedNeeds(userProfile), [userProfile]);
@@ -1653,7 +1660,7 @@ export default function CalorieLogger() {
                         <Input
                             id="height"
                             type="number"
-                            value={userProfile.height ?? ''}
+                            value={userProfile?.height ?? ''} // Handle potential undefined profile
                             onChange={(e) => handleProfileChange('height', e.target.value)}
                             placeholder="例如：175"
                             min="0"
@@ -1665,7 +1672,7 @@ export default function CalorieLogger() {
                         <Input
                             id="weight"
                             type="number"
-                            value={userProfile.weight ?? ''}
+                            value={userProfile?.weight ?? ''} // Handle potential undefined profile
                             onChange={(e) => handleProfileChange('weight', e.target.value)}
                             placeholder="例如：70"
                             min="0"
@@ -1677,14 +1684,14 @@ export default function CalorieLogger() {
                  <div className="space-y-1">
                     <Label htmlFor="activityLevel" className="flex items-center gap-1"><Activity size={14}/> 活動水平</Label>
                     <Select
-                         // Ensure Select has a default empty string value if profile is undefined
-                        value={userProfile.activityLevel || ''}
+                         // Ensure Select has a default empty string value if profile is undefined or null
+                        value={userProfile?.activityLevel || ''}
                         onValueChange={(value) => handleProfileChange('activityLevel', value as ActivityLevel | undefined)}
                     >
                         <SelectTrigger id="activityLevel" aria-label="選取活動水平">
                            {/* Ensure placeholder doesn't cause hydration error */}
                            <SelectValue placeholder={isClient ? "選取您的活動水平" : undefined}>
-                              {userProfile.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : (isClient ? "選取您的活動水平" : null)}
+                              {userProfile?.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : (isClient ? "選取您的活動水平" : null)}
                            </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
@@ -1728,7 +1735,8 @@ export default function CalorieLogger() {
           </CardHeader>
           <CardContent>
             {/* Adjust height based on viewport, ensure scrollbar visible */}
-             <ScrollArea className="h-[calc(100vh-200px)] min-h-[400px] pr-3"> {/* Adjusted height */}
+            {/* Use h-[calc(100vh-Xrem)] where X is the approximate height of elements above/below */}
+             <ScrollArea className="h-[calc(100vh-15rem)] min-h-[300px] pr-3"> {/* Adjust height calculation */}
               {/* Hydration Fix: Only render log content on the client */}
               {!isClient ? (
                  <div className="space-y-6"> {/* Increased spacing for skeleton */}
@@ -1819,3 +1827,4 @@ export default function CalorieLogger() {
     </div>
   );
 }
+
