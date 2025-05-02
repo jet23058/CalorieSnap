@@ -52,8 +52,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import ReactCrop, { type Crop, centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { Sheet, SheetTrigger } from '@/components/ui/sheet'; // Import Sheet components
-import { NotificationSettingsSheet } from '@/components/notification-settings-sheet'; // Import the new sheet component
-import { NotificationSettings, defaultSettings as defaultNotificationSettings } from '@/components/notification-settings-sheet'; // Import the settings types
+import { NotificationSettingsSheet, NotificationSettings, defaultSettings as defaultNotificationSettings } from '@/components/notification-settings-sheet'; // Import the new sheet component
 import {
   AlertDialog,
   AlertDialogAction,
@@ -160,7 +159,7 @@ const calculateBMI = (profile: UserProfile): number | null => {
 
 // Helper function to calculate Recommended Water Intake (simple version)
 // Example: 35ml per kg of body weight (adjust as needed)
-const calculateRecommendedWater = (profile: UserProfile): number | null => {
+const calculateRecommendedWater = (profile: UserProfile): number => {
     if (!profile.weight) return 2000; // Default to 2000ml if no weight
     return Math.round(profile.weight * 35);
 };
@@ -220,8 +219,10 @@ export default function CalorieLogger() {
               toast({ title: '成功', description: '已取得目前位置。' });
           },
           (geoError) => {
-              // Log specific error details
-              console.error(`取得地點時發生錯誤: ${geoError.message || 'No message'} (代碼: ${geoError.code || 'No code'})`, geoError);
+              // Log specific error details only if it's not a permission denied error
+              if (geoError.code !== geoError.PERMISSION_DENIED) {
+                console.error(`取得地點時發生錯誤: ${geoError.message || 'No message'} (代碼: ${geoError.code || 'No code'})`, geoError);
+              }
 
               let description = "無法取得您的地點。";
               if (geoError.code === geoError.PERMISSION_DENIED) {
@@ -306,40 +307,54 @@ export default function CalorieLogger() {
     mediaHeight: number,
     aspect: number | undefined, // Allow undefined for free crop
   ) {
-      if (!aspect) { // If no aspect ratio (free crop), default to full image initially
-           return centerCrop(
-             {
-               unit: '%',
-               width: 100,
-               height: 100,
-               x: 0,
-               y: 0,
-             },
-             mediaWidth,
-             mediaHeight,
-           );
-      }
-      // If aspect ratio is defined, use makeAspectCrop
-      return centerCrop(
-        makeAspectCrop(
-          {
-            unit: '%',
-            width: 90, // Default to 90% width crop when aspect is set
-          },
-          aspect,
-          mediaWidth,
-          mediaHeight,
-        ),
-        mediaWidth,
-        mediaHeight,
-      );
+      // Default to full image crop
+       return centerCrop(
+         {
+           unit: '%',
+           width: 100,
+           height: 100,
+           x: 0,
+           y: 0,
+         },
+         mediaWidth,
+         mediaHeight,
+       );
+
+      // Uncomment below if you want aspect ratio locking functionality back
+      // if (!aspect) { // If no aspect ratio (free crop), default to full image initially
+      //      return centerCrop(
+      //        {
+      //          unit: '%',
+      //          width: 100,
+      //          height: 100,
+      //          x: 0,
+      //          y: 0,
+      //        },
+      //        mediaWidth,
+      //        mediaHeight,
+      //      );
+      // }
+      // // If aspect ratio is defined, use makeAspectCrop
+      // return centerCrop(
+      //   makeAspectCrop(
+      //     {
+      //       unit: '%',
+      //       width: 90, // Default to 90% width crop when aspect is set
+      //     },
+      //     aspect,
+      //     mediaWidth,
+      //     mediaHeight,
+      //   ),
+      //   mediaWidth,
+      //   mediaHeight,
+      // );
   }
 
 
   function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
     const { width, height } = e.currentTarget;
-    // Center the crop area, respecting the current aspect setting (or full if undefined)
-    const initialCrop = centerAspectCrop(width, height, aspect);
+    // Center the crop area, defaulting to full image
+    const initialCrop = centerAspectCrop(width, height, undefined); // Always use undefined for full crop initially
     setCrop(initialCrop);
     setCompletedCrop(initialCrop); // Also set completed crop initially
   }
@@ -1056,7 +1071,7 @@ export default function CalorieLogger() {
                 <Droplet size={24} className="text-blue-500" /> 每日飲水追蹤
             </CardTitle>
              <CardDescription>
-                  建議飲水量：{recommendedWater ? `${recommendedWater} 毫升` : '請完成個人資料'} (約 {(recommendedWater || defaultWaterTarget) / 250} 杯)。
+                  建議飲水量：{recommendedWater ? `${recommendedWater} 毫升` : '請完成個人資料'} (約 {Math.ceil((recommendedWater || defaultWaterTarget) / 250)} 杯)。
                   {userProfile.weight && <span className="text-xs"> (基於 {userProfile.weight} 公斤體重)</span>}
              </CardDescription>
         </CardHeader>
@@ -1576,3 +1591,4 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
+
