@@ -33,6 +33,8 @@ import {
   Cat, // Added for achievement badge
   Trophy, // Added for achievement section title
   Image as ImageIcon, // Added for photo achievement badge
+  NotebookText, // Icon for Nutritionist Comments
+  ArrowDownUp, // Icon for sorting
 } from 'lucide-react';
 import {
   Tabs,
@@ -51,13 +53,13 @@ import { useToast } from '@/hooks/use-toast';
 import { isValidDate, cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; // Removed SelectGroup, SelectLabel
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose, DialogDescription } from "@/components/ui/dialog"; // Import Dialog components
-import ReactCrop, { type Crop, centerCrop } from 'react-image-crop'; // Removed makeAspectCrop
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose, DialogDescription } from "@/components/ui/dialog";
+import ReactCrop, { type Crop, centerCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import { Sheet, SheetTrigger } from '@/components/ui/sheet'; // Import Sheet components
-import { NotificationSettingsSheet, NotificationSettings, defaultSettings as defaultNotificationSettings } from '@/components/notification-settings-sheet'; // Import the new sheet component
+import { Sheet, SheetTrigger } from '@/components/ui/sheet';
+import { NotificationSettingsSheet, NotificationSettings, defaultSettings as defaultNotificationSettings } from '@/components/notification-settings-sheet';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -69,13 +71,18 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Calendar } from "@/components/ui/calendar"; // Import Calendar component
-import { format, isSameDay, startOfDay, subDays } from 'date-fns'; // Import date-fns helpers
-import { zhTW } from 'date-fns/locale'; // Import Traditional Chinese locale
-import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
+import { Calendar } from "@/components/ui/calendar";
+import { format, isSameDay, startOfDay, subDays, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+import { zhTW } from 'date-fns/locale';
+import { Skeleton } from "@/components/ui/skeleton";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"; // Import Accordion components
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"; // Import RadioGroup components
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
+type LogViewMode = 'daily' | 'monthly';
+type MonthlySortCriteria = 'time-desc' | 'time-asc' | 'calories-desc' | 'calories-asc';
+
 
 export interface CalorieLogEntry {
   id: string; // Unique ID for each entry
@@ -88,6 +95,7 @@ export interface CalorieLogEntry {
   cost: number | null;
   notes?: string; // Optional user notes
   confidence?: number; // AI confidence score (0-1)
+  nutritionistComment?: string; // Placeholder for nutritionist comments
 }
 
 // New interface for individual water log entries
@@ -213,6 +221,8 @@ export default function CalorieLogger() {
   const [isClient, setIsClient] = useState(false); // State for client-side rendering check
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(startOfDay(new Date())); // State for calendar date selection
   const [customWaterAmount, setCustomWaterAmount] = useState<string>(''); // State for custom water input
+  const [logViewMode, setLogViewMode] = useState<LogViewMode>('daily'); // State for log view mode
+  const [monthlySortCriteria, setMonthlySortCriteria] = useState<MonthlySortCriteria>('time-desc'); // State for monthly sorting
 
 
   const { toast } = useToast();
@@ -554,12 +564,26 @@ export default function CalorieLogger() {
 
   // --- Logging Logic ---
 
+  // Placeholder function to get nutritionist comment (replace with actual logic/AI call)
+  const getNutritionistComment = (entry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'>): string => {
+      // Basic example logic based on calories
+      if (entry.calorieEstimate > 600) {
+          return `提醒：此餐點熱量 (${Math.round(entry.calorieEstimate)} 卡) 偏高。建議留意份量控制，或搭配較低熱量的食物。多攝取蔬菜水果有助於均衡營養。`;
+      } else if (entry.calorieEstimate < 200 && entry.mealType !== 'Snack') {
+          return `注意：此餐點熱量 (${Math.round(entry.calorieEstimate)} 卡) 可能偏低。請確保攝取足夠的營養以維持身體機能。可考慮增加蛋白質或健康脂肪的攝取。`;
+      } else if (entry.foodItem.toLowerCase().includes('點心') || entry.foodItem.toLowerCase().includes('甜點') || entry.mealType === 'Snack') {
+          return `提醒：點心建議選擇天然、未加工的食物，如水果、堅果或優格，以獲取更豐富的營養。注意糖分攝取。`;
+      }
+      // Default comment if no specific condition met
+      return `請保持均衡飲食，多樣化攝取各類食物，並注意水分補充。`;
+  };
+
+
   const logCalories = () => {
     // Allow logging even if only imageSrc exists (before estimation finishes or if it fails)
     if (imageSrc) {
         const currentEstimation = estimation; // Capture current estimation state
-        const newEntry: CalorieLogEntry = {
-            id: Date.now().toString(), // Simple unique ID
+        const baseEntry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'> = {
             foodItem: currentEstimation?.foodItem ?? "未辨識", // Default if no estimation
             calorieEstimate: currentEstimation?.isFoodItem ? (currentEstimation.calorieEstimate ?? 0) : 0, // Use 0 if not food or undefined
             imageUrl: imageSrc, // Log the (potentially cropped) image
@@ -569,6 +593,16 @@ export default function CalorieLogger() {
             cost: null,
             confidence: currentEstimation?.isFoodItem ? (currentEstimation.confidence ?? 0) : 0, // Use 0 if not food or undefined
         };
+
+         // Generate nutritionist comment based on the entry details
+        const nutritionistComment = getNutritionistComment(baseEntry);
+
+        const newEntry: CalorieLogEntry = {
+            ...baseEntry,
+            id: Date.now().toString(), // Simple unique ID
+            nutritionistComment: nutritionistComment, // Add the generated comment
+        };
+
 
       try {
         // Use the setter function from useLocalStorage
@@ -674,9 +708,15 @@ export default function CalorieLogger() {
   const saveEdit = () => {
     if (editingEntry) {
       try {
+         // Re-generate nutritionist comment if relevant fields changed
+         const baseEntry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'> = { ...editingEntry };
+         const updatedComment = getNutritionistComment(baseEntry);
+         const finalEntry = { ...editingEntry, nutritionistComment: updatedComment };
+
+
         setCalorieLog(prevLog =>
             prevLog.map(entry =>
-                entry.id === editingEntry.id ? editingEntry : entry
+                entry.id === finalEntry.id ? finalEntry : entry
             )
         );
         toast({ title: "更新成功", description: "記錄項目已更新。" });
@@ -955,6 +995,22 @@ export default function CalorieLogger() {
                     </div>
                 </div>
             </CardHeader>
+             {/* Nutritionist Comment Accordion */}
+             {entry.nutritionistComment && (
+                 <Accordion type="single" collapsible className="w-full px-4 pb-2">
+                     <AccordionItem value={`comment-${entry.id}`} className="border-b-0">
+                         <AccordionTrigger className="text-xs text-muted-foreground py-1 hover:no-underline">
+                             <div className="flex items-center gap-1">
+                                 <NotebookText size={14} />
+                                 <span>營養師評論</span>
+                             </div>
+                         </AccordionTrigger>
+                         <AccordionContent className="text-xs text-muted-foreground pt-1">
+                             {entry.nutritionistComment}
+                         </AccordionContent>
+                     </AccordionItem>
+                 </Accordion>
+             )}
         </Card>
     </React.Fragment>
  );
@@ -1025,15 +1081,52 @@ export default function CalorieLogger() {
 );
 
 
- // Filter logs for the selected date
+ // Filter logs based on view mode and selected date/month
  const filteredLog = useMemo(() => {
-    if (!selectedDate) return [];
-    return calorieLog.filter(entry => {
-        if (!entry || !entry.timestamp) return false;
-        const entryDate = new Date(entry.timestamp);
-        return isValidDate(entryDate) && isSameDay(entryDate, selectedDate);
-    });
- }, [calorieLog, selectedDate]);
+     if (!selectedDate) return [];
+
+     let logsToDisplay: CalorieLogEntry[];
+
+     if (logViewMode === 'daily') {
+         logsToDisplay = calorieLog.filter(entry => {
+             if (!entry || !entry.timestamp) return false;
+             const entryDate = new Date(entry.timestamp);
+             return isValidDate(entryDate) && isSameDay(entryDate, selectedDate);
+         });
+         // Daily view always sorts by time descending
+         logsToDisplay.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+     } else { // Monthly view
+         const monthStart = startOfMonth(selectedDate);
+         const monthEnd = endOfMonth(selectedDate);
+         logsToDisplay = calorieLog.filter(entry => {
+             if (!entry || !entry.timestamp) return false;
+             const entryDate = new Date(entry.timestamp);
+             return isValidDate(entryDate) && isWithinInterval(entryDate, { start: monthStart, end: monthEnd });
+         });
+
+         // Apply monthly sorting
+         switch (monthlySortCriteria) {
+             case 'time-asc':
+                 logsToDisplay.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                 break;
+             case 'calories-desc':
+                 logsToDisplay.sort((a, b) => b.calorieEstimate - a.calorieEstimate);
+                 break;
+             case 'calories-asc':
+                 logsToDisplay.sort((a, b) => a.calorieEstimate - b.calorieEstimate);
+                 break;
+             case 'time-desc': // Default
+             default:
+                 logsToDisplay.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                 break;
+         }
+     }
+
+     return logsToDisplay;
+
+ }, [calorieLog, selectedDate, logViewMode, monthlySortCriteria]);
+
 
  // Get dates with calorie logs for calendar highlighting
  const calorieLoggedDays = useMemo(() => {
@@ -1089,11 +1182,21 @@ export default function CalorieLogger() {
         // Render placeholder or loading state on the server
         return (
              <div className="mt-6">
-                <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center gap-2"><CalendarDays size={24}/> 卡路里記錄摘要</h2>
-                <div className="mb-4 flex justify-center">
-                    {/* Calendar Placeholder */}
-                    <Skeleton className="h-[300px] w-[350px] rounded-md" />
-                </div>
+                 <div className="flex justify-between items-center mb-4">
+                     <h2 className="text-2xl font-semibold text-primary flex items-center gap-2"><CalendarDays size={24}/> 卡路里記錄摘要</h2>
+                      {/* View Mode Toggle Placeholder */}
+                      <Skeleton className="h-9 w-32 rounded-md" />
+                 </div>
+
+                 {/* Calendar/Month Selector Placeholder */}
+                 <div className="mb-4 flex justify-center">
+                     <Skeleton className="h-[300px] w-[350px] rounded-md" />
+                 </div>
+                  {/* Sorting Options Placeholder (for monthly view) */}
+                  <div className="mb-4 flex justify-end">
+                      <Skeleton className="h-9 w-40 rounded-md" />
+                  </div>
+
                 <div className="space-y-4">
                     {[...Array(2)].map((_, i) => ( // Reduced placeholder count
                          <Card key={i} className="mb-4 opacity-50 animate-pulse">
@@ -1111,6 +1214,10 @@ export default function CalorieLogger() {
                                      </div>
                                 </div>
                             </CardHeader>
+                             {/* Accordion Placeholder */}
+                             <div className="px-4 pb-2">
+                                 <Skeleton className="h-6 w-1/3 rounded"/>
+                             </div>
                         </Card>
                     ))}
                 </div>
@@ -1118,36 +1225,110 @@ export default function CalorieLogger() {
         );
     }
 
+     const handleMonthChange = (month: Date) => {
+        // When changing month in monthly view, set selectedDate to the first of that month
+        setSelectedDate(startOfMonth(month));
+     };
+
 
     return (
         <div className="mt-6">
             {renderStorageError()}
-            <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center gap-2"><CalendarDays size={24}/> 卡路里記錄摘要</h2>
-
-            <div className="mb-6 flex justify-center">
-                 <Calendar
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={setSelectedDate}
-                    className="rounded-md border shadow-sm"
-                    disabled={date => date > new Date() || date < new Date("1900-01-01")} // Disable future dates
-                    initialFocus
-                    locale={zhTW} // Use Traditional Chinese locale
-                    modifiers={{
-                        calorieLogged: calorieLoggedDays, // Days with calorie logs
-                        waterLogged: waterLoggedDays,   // Days with water logs
-                    }}
-                    modifiersStyles={{
-                        calorieLogged: { fontWeight: 'bold', color: 'hsl(var(--primary))' }, // Green for calorie logs
-                        waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' }, // Orange border for water logs
-                    }}
-                 />
+             <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-2">
+                <h2 className="text-2xl font-semibold text-primary flex items-center gap-2 shrink-0">
+                    <CalendarDays size={24}/> 卡路里記錄摘要
+                </h2>
+                 {/* View Mode Toggle */}
+                 <RadioGroup
+                     defaultValue="daily"
+                     value={logViewMode}
+                     onValueChange={(value) => setLogViewMode(value as LogViewMode)}
+                     className="flex space-x-2 bg-muted p-1 rounded-md"
+                 >
+                     <div className="flex items-center space-x-1">
+                         <RadioGroupItem value="daily" id="view-daily" />
+                         <Label htmlFor="view-daily" className="text-sm font-medium cursor-pointer">單日</Label>
+                     </div>
+                     <div className="flex items-center space-x-1">
+                         <RadioGroupItem value="monthly" id="view-monthly" />
+                         <Label htmlFor="view-monthly" className="text-sm font-medium cursor-pointer">整月</Label>
+                     </div>
+                 </RadioGroup>
             </div>
 
+
+            {/* Calendar or Month Navigation */}
+            <div className="mb-6 flex justify-center">
+                 {logViewMode === 'daily' ? (
+                     <Calendar
+                         mode="single"
+                         selected={selectedDate}
+                         onSelect={setSelectedDate}
+                         className="rounded-md border shadow-sm"
+                         disabled={date => date > new Date() || date < new Date("1900-01-01")}
+                         initialFocus
+                         locale={zhTW}
+                         modifiers={{
+                             calorieLogged: calorieLoggedDays,
+                             waterLogged: waterLoggedDays,
+                         }}
+                         modifiersStyles={{
+                             calorieLogged: { fontWeight: 'bold', color: 'hsl(var(--primary))' },
+                             waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
+                         }}
+                     />
+                 ) : (
+                     <Calendar
+                         mode="single"
+                         selected={selectedDate}
+                         onSelect={setSelectedDate} // Allow selecting a day within the month view
+                         onMonthChange={handleMonthChange} // Handle month navigation
+                         month={selectedDate} // Control the displayed month
+                         className="rounded-md border shadow-sm"
+                         disabled={date => date > new Date() || date < new Date("1900-01-01")}
+                         locale={zhTW}
+                         modifiers={{
+                             calorieLogged: calorieLoggedDays,
+                             waterLogged: waterLoggedDays,
+                         }}
+                         modifiersStyles={{
+                             calorieLogged: { fontWeight: 'bold', color: 'hsl(var(--primary))' },
+                             waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
+                         }}
+                         captionLayout="dropdown-buttons" // Use dropdowns for month/year
+                         fromYear={2020} // Example start year
+                         toYear={new Date().getFullYear()} // Current year
+                     />
+                 )}
+            </div>
+
+             {/* Sorting Options (Monthly View Only) */}
+             {logViewMode === 'monthly' && (
+                 <div className="mb-4 flex justify-end">
+                     <Select value={monthlySortCriteria} onValueChange={(value) => setMonthlySortCriteria(value as MonthlySortCriteria)}>
+                         <SelectTrigger className="w-full sm:w-[180px]">
+                             <ArrowDownUp size={16} className="mr-2"/>
+                             <SelectValue placeholder="排序方式" />
+                         </SelectTrigger>
+                         <SelectContent>
+                             <SelectItem value="time-desc">時間 (最新優先)</SelectItem>
+                             <SelectItem value="time-asc">時間 (最舊優先)</SelectItem>
+                             <SelectItem value="calories-desc">卡路里 (高到低)</SelectItem>
+                             <SelectItem value="calories-asc">卡路里 (低到高)</SelectItem>
+                         </SelectContent>
+                     </Select>
+                 </div>
+             )}
+
+
+            {/* Log Entries */}
             {selectedDate && (
                 <div>
                     <h3 className="text-lg font-medium mb-3 border-b pb-1 text-muted-foreground">
-                         {format(selectedDate, 'yyyy 年 MM 月 dd 日', { locale: zhTW })} 的記錄
+                         {logViewMode === 'daily'
+                            ? `${format(selectedDate, 'yyyy 年 MM 月 dd 日', { locale: zhTW })} 的記錄`
+                            : `${format(selectedDate, 'yyyy 年 MM 月', { locale: zhTW })} 的記錄`
+                         }
                     </h3>
                     {filteredLog.length > 0 ? (
                         <div className="space-y-4">
@@ -1156,7 +1337,12 @@ export default function CalorieLogger() {
                     ) : (
                         <div className="text-center text-muted-foreground py-6">
                             <UtensilsCrossed className="mx-auto h-10 w-10 opacity-40 mb-3" />
-                            <p>這天沒有記錄任何卡路里。</p>
+                             <p>
+                                 {logViewMode === 'daily'
+                                     ? '這天沒有記錄任何卡路里。'
+                                     : '這個月沒有記錄任何卡路里。'
+                                 }
+                             </p>
                         </div>
                     )}
                 </div>
@@ -1165,7 +1351,7 @@ export default function CalorieLogger() {
             {/* Fallback if no date is selected (shouldn't happen with default) */}
             {!selectedDate && calorieLog.length > 0 && (
                  <div className="text-center text-muted-foreground py-6">
-                     <p>請在日曆上選擇一天以查看記錄。</p>
+                     <p>請選擇一個日期或月份以查看記錄。</p>
                  </div>
             )}
 
