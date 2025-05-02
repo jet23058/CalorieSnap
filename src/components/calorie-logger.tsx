@@ -1196,9 +1196,22 @@ export default function CalorieLogger() {
                         alt={`記錄項目：${entry.foodItem}`}
                         fill sizes="(max-width: 640px) 4rem, 5rem"
                         style={{ objectFit: 'cover' }} className="rounded-md" data-ai-hint="食物 盤子" loading="lazy"
-                        onError={(e) => { /* Error handling logic */ }}
+                        onError={(e) => {
+                            console.warn(`Error loading image for entry ${entry.id}`, e);
+                             // Optionally set a flag or use a placeholder src
+                             // e.currentTarget.src = '/placeholder-image.png';
+                             e.currentTarget.style.display = 'none'; // Hide broken image icon
+                             // Find the parent div and show a fallback icon
+                             const parentDiv = e.currentTarget.parentElement;
+                             if (parentDiv) {
+                                 const fallbackIcon = parentDiv.querySelector('.fallback-icon');
+                                 if (fallbackIcon) fallbackIcon.classList.remove('hidden');
+                             }
+                         }}
                     />
-                ) : ( <ImageOff size={32} aria-label="無可用影像"/> )}
+                ) : null }
+                {/* Fallback Icon - Hidden by default, shown on error */}
+                 <ImageOff size={32} aria-label="無可用影像" className={`fallback-icon ${entry.imageUrl ? 'hidden' : ''}`} />
             </div>
 
             {/* Content / Edit Form */}
