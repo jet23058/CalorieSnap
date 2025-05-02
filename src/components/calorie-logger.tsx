@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { estimateCalorieCount, type EstimateCalorieCountOutput } from '@/ai/flows/estimate-calorie-count';
 import useLocalStorage, { LocalStorageError } from '@/hooks/use-local-storage'; // Import LocalStorageError
@@ -12,13 +12,16 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingSpinner } from '@/components/loading-spinner';
-import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop } from 'lucide-react'; // Added ImageUp, Crop
+import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3 } from 'lucide-react'; // Added ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog'; // Import Dialog components including DialogDescription
 import ReactCrop, { type Crop as CropType, centerCrop, makeAspectCrop, PixelCrop } from 'react-image-crop'; // Import react-image-crop
 import 'react-image-crop/dist/ReactCrop.css'; // Import css styles for react-image-crop
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for placeholder
+import { format, startOfDay, parseISO } from 'date-fns'; // Import date-fns functions
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -27,6 +30,21 @@ const mealTypeTranslations: Record<MealType, string> = {
     Lunch: '午餐',
     Dinner: '晚餐',
     Snack: '點心',
+};
+
+// Activity Level Types
+type ActivityLevel = 'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active';
+const activityLevelTranslations: Record<ActivityLevel, string> = {
+    sedentary: '久坐（很少或沒有運動）',
+    lightly_active: '輕度活躍（輕度運動/運動 1-3 天/週）',
+    moderately_active: '中度活躍（中度運動/運動 3-5 天/週）',
+    very_active: '非常活躍（高強度運動/運動 6-7 天/週）',
+};
+const activityLevelMultipliers: Record<ActivityLevel, number> = {
+    sedentary: 1.2,
+    lightly_active: 1.375,
+    moderately_active: 1.55,
+    very_active: 1.725,
 };
 
 
@@ -41,11 +59,22 @@ interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem'> {
   amount?: number; // Optional amount/cost
 }
 
-// Interface used within the component (can include transient data, but now mirrors storage)
-// Not strictly needed if LogEntryStorage has everything, but kept for consistency for now.
-interface LogEntryDisplay extends LogEntryStorage {
-    // No additional fields needed currently
+// User Profile Interface
+interface UserProfile {
+    height?: number; // in cm
+    weight?: number; // in kg
+    activityLevel?: ActivityLevel;
+    // Add gender and age later if needed for more accurate calculations
 }
+
+// Daily Summary Interface
+interface DailySummary {
+    date: string; // YYYY-MM-DD
+    totalCalories: number;
+    totalAmount: number;
+    entries: LogEntryStorage[];
+}
+
 
 // Compression settings
 const IMAGE_MAX_WIDTH = 1024; // Max width for the compressed image
@@ -156,6 +185,20 @@ function getCroppedImg(
   });
 }
 
+// Simple BMR Calculation (Mifflin-St Jeor Equation - Simplified, assumes age 30, male for demo)
+// A real app should ask for age and gender.
+const calculateEstimatedNeeds = (profile: UserProfile): number | null => {
+    if (!profile.weight || !profile.height || !profile.activityLevel) {
+        return null; // Not enough info
+    }
+    // Simplified: Using male formula and assuming age 30
+    // BMR = (10 * weight in kg) + (6.25 * height in cm) - (5 * age) + 5
+    const age = 30; // Assumption
+    const bmr = (10 * profile.weight) + (6.25 * profile.height) - (5 * age) + 5;
+    const multiplier = activityLevelMultipliers[profile.activityLevel];
+    return Math.round(bmr * multiplier);
+};
+
 
 export default function CalorieLogger() {
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null); // For cropper
@@ -166,6 +209,9 @@ export default function CalorieLogger() {
   const [error, setError] = useState<string | null>(null);
   // Use the storage-specific type for localStorage
   const [calorieLog, setCalorieLog] = useLocalStorage<LogEntryStorage[]>('calorieLog', []);
+  const [userProfile, setUserProfile] = useLocalStorage<UserProfile>('userProfile', {});
+  const [dailySummaries, setDailySummaries] = useState<DailySummary[]>([]); // State for daily summaries
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null); // Used for taking picture
@@ -203,6 +249,44 @@ export default function CalorieLogger() {
       }
     };
   }, [stream]);
+
+  // Calculate Daily Summaries when log changes
+  useEffect(() => {
+    if (!isClient || calorieLog.length === 0) {
+        setDailySummaries([]); // Clear summaries if log is empty or not on client
+        return;
+    }
+
+    const summaries: { [date: string]: DailySummary } = {};
+
+    calorieLog.forEach(entry => {
+        const entryDate = format(startOfDay(new Date(entry.timestamp)), 'yyyy-MM-dd');
+        if (!summaries[entryDate]) {
+            summaries[entryDate] = {
+                date: entryDate,
+                totalCalories: 0,
+                totalAmount: 0,
+                entries: []
+            };
+        }
+        summaries[entryDate].totalCalories += entry.calorieEstimate;
+        summaries[entryDate].totalAmount += entry.amount || 0;
+        summaries[entryDate].entries.push(entry);
+    });
+
+    // Sort entries within each summary by timestamp (descending)
+    Object.values(summaries).forEach(summary => {
+        summary.entries.sort((a, b) => b.timestamp - a.timestamp);
+    });
+
+    // Convert to array and sort summaries by date (descending)
+    const sortedSummaries = Object.values(summaries).sort((a, b) =>
+        b.date.localeCompare(a.date) // Sorts YYYY-MM-DD strings correctly
+    );
+
+    setDailySummaries(sortedSummaries);
+  }, [calorieLog, isClient]); // Re-run when log or client status changes
+
 
   // Function to fetch current location
   const fetchCurrentLocation = useCallback(() => {
@@ -675,6 +759,22 @@ export default function CalorieLogger() {
     }
 };
 
+  // Handlers for User Profile Input
+  const handleProfileChange = (field: keyof UserProfile, value: string | number | ActivityLevel | undefined) => {
+    setUserProfile(prev => {
+        const newProfile = { ...prev };
+        if (field === 'height' || field === 'weight') {
+            const numValue = value === '' ? undefined : parseFloat(value as string);
+            newProfile[field] = numValue !== undefined && !isNaN(numValue) && numValue >= 0 ? numValue : undefined;
+        } else if (field === 'activityLevel') {
+            newProfile[field] = value as ActivityLevel | undefined;
+        }
+        return newProfile;
+    });
+ };
+
+  const estimatedDailyNeeds = useMemo(() => calculateEstimatedNeeds(userProfile), [userProfile]);
+
 
   const triggerFileInput = () => {
      // Clear previous image src if user clicks upload again
@@ -871,10 +971,92 @@ export default function CalorieLogger() {
     return null; // No result or error yet
   };
 
+  const renderLogEntry = (entry: LogEntryStorage) => (
+    <div className="flex items-start space-x-4">
+        {/* Display Image or Placeholder */}
+         <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden"> {/* Fixed size and overflow hidden */}
+            {entry.imageUrl ? (
+                <Image
+                    src={entry.imageUrl}
+                    alt={`記錄項目：${entry.foodItem}`}
+                    fill // Use fill to cover the container
+                    sizes="(max-width: 640px) 4rem, 5rem" // Provide sizes hint
+                    style={{ objectFit: 'cover' }} // Cover the area
+                    className="rounded-md"
+                    data-ai-hint="食物 盤子"
+                    // Consider adding loading="lazy" for log images
+                    loading="lazy"
+                    // Add error handling for images that might fail to load (e.g., if data URI is corrupted)
+                    onError={(e) => {
+                        // Optionally replace with placeholder on error
+                        (e.target as HTMLImageElement).src = ''; // Clear src
+                        (e.target as HTMLImageElement).style.display = 'none'; // Hide broken image icon
+                        // You might want to show the ImageOff icon here instead programmatically
+                        const parentDiv = (e.target as HTMLImageElement).parentElement;
+                        if(parentDiv){
+                             const icon = document.createElement('span'); // Or render the lucide icon properly
+                             icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off w-8 h-8"><path d="M11 19.59V15l-2.3 2.3a1 1 0 0 1-1.4 0l-1.7-1.7a1 1 0 0 1 0-1.4L8.6 11"/><path d="m15 11 1.4-1.4a1 1 0 0 1 1.4 0l1.7 1.7a1 1 0 0 1 0 1.4L17 15"/><line x1="2" x2="22" y1="2" y2="22"/><path d="M8.5 11.5 5 15l4 4"/><path d="M14 14l3-3 4 4"/><path d="M21 15V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v10c0 .4.1.8.4 1.1"/></svg>';
+                             icon.className = "text-muted-foreground opacity-50";
+                             parentDiv.appendChild(icon);
+                        }
+                    }}
+                />
+            ) : (
+               <ImageOff size={32} aria-label="無可用影像"/>
+            )}
+        </div>
+
+        <div className="flex-1 space-y-1 overflow-hidden"> {/* Prevent text overflow */}
+            <p className="font-semibold text-base truncate">{entry.foodItem}</p> {/* Truncate long names */}
+            <p className="text-sm text-primary">{entry.calorieEstimate} 大卡</p>
+
+             <div className="text-xs text-muted-foreground space-y-0.5">
+                 {/* Combine Meal Type and Time */}
+                 <div className="flex items-center flex-wrap gap-x-2">
+                    {entry.mealType && (
+                        <div className="flex items-center">
+                            {renderMealIcon(entry.mealType)}
+                            <span>{mealTypeTranslations[entry.mealType]}</span> {/* Use translated text */}
+                        </div>
+                    )}
+                     <span>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+
+                 </div>
+
+                {entry.location && (
+                    <div className="flex items-center">
+                        <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" /> {/* Prevent shrinking */}
+                        <span className="truncate">{entry.location}</span> {/* Truncate long locations */}
+                    </div>
+                )}
+                {entry.amount !== undefined && entry.amount !== null && (
+                    <div className="flex items-center">
+                        <DollarSign className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
+                        {/* Ensure amount is treated as number and formatted */}
+                        <span>{(typeof entry.amount === 'number' ? entry.amount.toFixed(2) : 'N/A')} 元</span> {/* Added currency unit */}
+                    </div>
+                )}
+             </div>
+
+        </div>
+        {/* Delete Button */}
+        <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => deleteLogEntry(entry.id)}
+            className="text-destructive hover:bg-destructive/10 mt-1 shrink-0 self-start" // Align top
+            aria-label={`刪除 ${entry.foodItem} 的記錄項目`}
+            title={`刪除 ${entry.foodItem}`} // Tooltip
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+  );
+
 
   return (
     <div className="flex flex-col md:flex-row gap-8">
-       {/* Left Column: Image Capture & Estimation */}
+       {/* Left Column: Image Capture, Estimation, Profile */}
       <div className="md:w-1/2 space-y-6">
         <Card>
           <CardHeader>
@@ -1023,135 +1205,154 @@ export default function CalorieLogger() {
        {/* Render Estimation/Log Details Card - Show if we have a result OR if there was an error during estimation */}
         { (estimationResult || (error && imageSrc)) && !isCameraOpen && !isCropping && renderEstimationResult()}
 
+       {/* User Profile Card */}
+        <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2"><User size={20}/> 您的個人資料</CardTitle>
+                <CardDescription>輸入您的資訊以估計每日卡路里需求。(資料儲存在您的瀏覽器中)</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                        <Label htmlFor="height" className="flex items-center gap-1"><Ruler size={14}/> 身高 (公分)</Label>
+                        <Input
+                            id="height"
+                            type="number"
+                            value={userProfile.height ?? ''}
+                            onChange={(e) => handleProfileChange('height', e.target.value)}
+                            placeholder="例如：175"
+                            min="0"
+                            aria-label="輸入身高（公分）"
+                        />
+                    </div>
+                    <div className="space-y-1">
+                        <Label htmlFor="weight" className="flex items-center gap-1"><Weight size={14}/> 體重 (公斤)</Label>
+                        <Input
+                            id="weight"
+                            type="number"
+                            value={userProfile.weight ?? ''}
+                            onChange={(e) => handleProfileChange('weight', e.target.value)}
+                            placeholder="例如：70"
+                            min="0"
+                            step="0.1"
+                            aria-label="輸入體重（公斤）"
+                        />
+                    </div>
+                </div>
+                 <div className="space-y-1">
+                    <Label htmlFor="activityLevel" className="flex items-center gap-1"><Activity size={14}/> 活動水平</Label>
+                    <Select
+                        value={userProfile.activityLevel}
+                        onValueChange={(value) => handleProfileChange('activityLevel', value as ActivityLevel)}
+                    >
+                        <SelectTrigger id="activityLevel" aria-label="選取活動水平">
+                            <SelectValue placeholder="選取您的活動水平" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {Object.entries(activityLevelTranslations).map(([key, label]) => (
+                                <SelectItem key={key} value={key}>{label}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                 {/* Display Estimated Needs */}
+                {estimatedDailyNeeds !== null && (
+                    <div className="pt-2 text-sm text-muted-foreground">
+                        估計每日卡路里需求: <strong className="text-primary">{estimatedDailyNeeds} 大卡</strong>
+                         <p className="text-xs">(此為粗略估計，僅供參考)</p>
+                    </div>
+                )}
+                 {/* Apple Health Integration Placeholder */}
+                 <Button variant="outline" disabled className="w-full mt-2">
+                      {/* Placeholder - Apple Health integration requires native capabilities or specific APIs not available in standard web */}
+                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 mr-2"><path d="M12.001 4.5a.75.75 0 01.75.75v1.502a.75.75 0 01-1.5 0V5.25a.75.75 0 01.75-.75zM12 9a.75.75 0 01.75.75v5.495a.75.75 0 01-1.5 0V9.75A.75.75 0 0112 9zm8.036 1.41l1.83 1.22-.001.001A11.95 11.95 0 0112 21.75c-2.672 0-5.153-.873-7.16-2.34l-.005-.003-1.83-1.22a.75.75 0 11.9-1.2l1.83 1.22a10.45 10.45 0 0012.46 0l1.83-1.22a.75.75 0 01.9 1.2zM12 2.25C6.34 2.25 1.75 6.84 1.75 12.5S6.34 22.75 12 22.75 22.25 18.16 22.25 12.5 17.66 2.25 12 2.25zm0 1.5a8.75 8.75 0 100 17.5 8.75 8.75 0 000-17.5z" clipRule="evenodd"></path></svg>
+                     連接 Apple 健康 (開發中)
+                 </Button>
+                 <p className="text-xs text-muted-foreground text-center mt-1">Apple 健康整合需要特定的權限和設定。</p>
+            </CardContent>
+        </Card>
 
       </div>
 
-      {/* Right Column: Calorie Log */}
+      {/* Right Column: Calorie Log Summary */}
       <div className="md:w-1/2 space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle>您的卡路里記錄</CardTitle>
-            <CardDescription>最近記錄的項目。</CardDescription>
+            <CardTitle className="flex items-center gap-2"><BarChart3 size={20}/> 您的卡路里記錄</CardTitle>
+            <CardDescription>最近記錄的項目摘要。</CardDescription>
           </CardHeader>
           <CardContent>
             {/* Adjust height based on viewport, ensure scrollbar visible */}
-             <ScrollArea className="h-[calc(100vh-250px)] min-h-[400px] pr-3"> {/* Example height, adjust as needed */}
+             <ScrollArea className="h-[calc(100vh-200px)] min-h-[400px] pr-3"> {/* Adjusted height */}
               {/* Hydration Fix: Only render log content on the client */}
               {!isClient ? (
-                 <div className="space-y-4">
+                 <div className="space-y-6"> {/* Increased spacing for skeleton */}
                      {/* Render Skeletons or placeholder while waiting for client mount */}
-                     {[...Array(3)].map((_, index) => (
-                         <div key={index} className="flex items-start space-x-4 p-1">
-                           <Skeleton className="w-16 h-16 sm:w-20 sm:h-20 rounded-md flex-shrink-0" />
-                           <div className="flex-1 space-y-2">
-                             <Skeleton className="h-4 w-3/4 rounded" />
-                             <Skeleton className="h-4 w-1/4 rounded" />
-                             <Skeleton className="h-3 w-1/2 rounded" />
-                             <Skeleton className="h-3 w-2/3 rounded" />
-                           </div>
-                           <Skeleton className="w-8 h-8 rounded-full" />
-                         </div>
+                     {[...Array(2)].map((_, index) => (
+                        <Card key={index} className="p-4">
+                            <Skeleton className="h-5 w-1/3 mb-3 rounded" /> {/* Date Skeleton */}
+                             <div className="flex justify-between mb-3">
+                                <Skeleton className="h-4 w-1/4 rounded" /> {/* Calories Skeleton */}
+                                <Skeleton className="h-4 w-1/4 rounded" /> {/* Amount Skeleton */}
+                             </div>
+                             {/* Entry Skeletons */}
+                             {[...Array(2)].map((_, entryIndex) => (
+                                 <div key={entryIndex} className="flex items-start space-x-4 py-2 border-t border-border/50">
+                                    <Skeleton className="w-16 h-16 rounded-md flex-shrink-0" />
+                                    <div className="flex-1 space-y-2">
+                                        <Skeleton className="h-4 w-3/4 rounded" />
+                                        <Skeleton className="h-4 w-1/4 rounded" />
+                                        <Skeleton className="h-3 w-1/2 rounded" />
+                                        <Skeleton className="h-3 w-2/3 rounded" />
+                                    </div>
+                                    <Skeleton className="w-8 h-8 rounded-full" />
+                                 </div>
+                             ))}
+                        </Card>
                      ))}
                  </div>
-              ) : calorieLog.length === 0 ? (
+              ) : dailySummaries.length === 0 ? (
                  <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4 pt-16"> {/* Added padding top */}
                     <UtensilsCrossed className="w-12 h-12 mb-4 opacity-50" />
                     <p className="text-lg font-medium">您的記錄是空的</p>
                     <p>拍下食物照片開始記錄吧！</p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {/* Map over LogEntryStorage, which now includes imageUrl */}
-                  {calorieLog.map((entry, index) => ( // Add index
-                    <React.Fragment key={entry.id}> {/* Use Fragment */}
-                      <div className="flex items-start space-x-4">
-                        {/* Display Image or Placeholder */}
-                         <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden"> {/* Fixed size and overflow hidden */}
-                            {entry.imageUrl ? (
-                                <Image
-                                    src={entry.imageUrl}
-                                    alt={`記錄項目：${entry.foodItem}`}
-                                    fill // Use fill to cover the container
-                                    sizes="(max-width: 640px) 4rem, 5rem" // Provide sizes hint
-                                    style={{ objectFit: 'cover' }} // Cover the area
-                                    className="rounded-md"
-                                    data-ai-hint="食物 盤子"
-                                    // Consider adding loading="lazy" for log images
-                                    loading="lazy"
-                                    // Add error handling for images that might fail to load (e.g., if data URI is corrupted)
-                                    onError={(e) => {
-                                        // Optionally replace with placeholder on error
-                                        (e.target as HTMLImageElement).src = ''; // Clear src
-                                        (e.target as HTMLImageElement).style.display = 'none'; // Hide broken image icon
-                                        // You might want to show the ImageOff icon here instead programmatically
-                                        const parentDiv = (e.target as HTMLImageElement).parentElement;
-                                        if(parentDiv){
-                                             const icon = document.createElement('span'); // Or render the lucide icon properly
-                                             icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off w-8 h-8"><path d="M11 19.59V15l-2.3 2.3a1 1 0 0 1-1.4 0l-1.7-1.7a1 1 0 0 1 0-1.4L8.6 11"/><path d="m15 11 1.4-1.4a1 1 0 0 1 1.4 0l1.7 1.7a1 1 0 0 1 0 1.4L17 15"/><line x1="2" x2="22" y1="2" y2="22"/><path d="M8.5 11.5 5 15l4 4"/><path d="M14 14l3-3 4 4"/><path d="M21 15V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v10c0 .4.1.8.4 1.1"/></svg>';
-                                             icon.className = "text-muted-foreground opacity-50";
-                                             parentDiv.appendChild(icon);
-                                        }
-                                    }}
-                                />
-                            ) : (
-                               <ImageOff size={32} aria-label="無可用影像"/>
-                            )}
-                        </div>
-
-                        <div className="flex-1 space-y-1 overflow-hidden"> {/* Prevent text overflow */}
-                            <p className="font-semibold text-base truncate">{entry.foodItem}</p> {/* Truncate long names */}
-                            <p className="text-sm text-primary">{entry.calorieEstimate} 大卡</p>
-
-                             <div className="text-xs text-muted-foreground space-y-0.5">
-                                 {/* Combine Meal Type and Time */}
-                                 <div className="flex items-center flex-wrap gap-x-2">
-                                    {entry.mealType && (
-                                        <div className="flex items-center">
-                                            {renderMealIcon(entry.mealType)}
-                                            <span>{mealTypeTranslations[entry.mealType]}</span> {/* Use translated text */}
-                                        </div>
-                                    )}
-                                     <span>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
-                                    <span>({new Date(entry.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })})</span>
-                                 </div>
-
-                                {entry.location && (
-                                    <div className="flex items-center">
-                                        <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" /> {/* Prevent shrinking */}
-                                        <span className="truncate">{entry.location}</span> {/* Truncate long locations */}
-                                    </div>
-                                )}
-                                {entry.amount !== undefined && entry.amount !== null && (
-                                    <div className="flex items-center">
-                                        <DollarSign className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
-                                        {/* Ensure amount is treated as number and formatted */}
-                                        <span>{(typeof entry.amount === 'number' ? entry.amount.toFixed(2) : 'N/A')} 元</span> {/* Added currency unit */}
-                                    </div>
-                                )}
-                                {/* <p> Confidence: {Math.round(entry.confidence * 100)}% </p> */} {/* Optional: Show confidence */}
-
+                <Accordion type="single" collapsible className="w-full space-y-4">
+                   {dailySummaries.map((summary, index) => (
+                      <AccordionItem key={summary.date} value={`item-${index}`}>
+                        <Card className="overflow-hidden"> {/* Apply overflow hidden to card */}
+                           <AccordionTrigger className="px-4 py-3 hover:no-underline bg-muted/50">
+                             <div className="flex justify-between items-center w-full">
+                               <span className="font-semibold text-base">
+                                 {format(parseISO(summary.date), 'yyyy年MM月dd日')} {/* Format date */}
+                               </span>
+                               <div className="text-sm text-right">
+                                 <p className="text-primary">{summary.totalCalories} 大卡</p>
+                                 {summary.totalAmount > 0 && (
+                                     <p className="text-muted-foreground">{summary.totalAmount.toFixed(2)} 元</p>
+                                 )}
+                               </div>
                              </div>
+                           </AccordionTrigger>
+                           <AccordionContent className="border-t border-border"> {/* Add border */}
+                             <div className="p-4 space-y-4">
+                               {summary.entries.map((entry) => (
+                                   <React.Fragment key={entry.id}>
+                                      {renderLogEntry(entry)}
+                                      {/* Add separator between entries within a day */}
+                                      {summary.entries.indexOf(entry) < summary.entries.length - 1 && (
+                                         <Separator className="my-3" />
+                                      )}
+                                   </React.Fragment>
+                               ))}
+                             </div>
+                           </AccordionContent>
+                        </Card>
+                      </AccordionItem>
+                    ))}
+                </Accordion>
 
-                        </div>
-                        {/* Delete Button */}
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => deleteLogEntry(entry.id)}
-                            className="text-destructive hover:bg-destructive/10 mt-1 shrink-0 self-start" // Align top
-                            aria-label={`刪除 ${entry.foodItem} 的記錄項目`}
-                            title={`刪除 ${entry.foodItem}`} // Tooltip
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      {/* Add separator only if it's not the last item */}
-                      {index < calorieLog.length - 1 && (
-                         <Separator className="my-4" />
-                      )}
-                    </React.Fragment> // Close Fragment
-                  ))}
-                </div>
               )}
             </ScrollArea>
           </CardContent>
@@ -1160,4 +1361,3 @@ export default function CalorieLogger() {
     </div>
   );
 }
-
