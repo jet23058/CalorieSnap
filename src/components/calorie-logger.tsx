@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
@@ -7,16 +8,24 @@ import useLocalStorage from '@/hooks/use-local-storage';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingSpinner } from '@/components/loading-spinner';
-import { Camera, Trash2, PlusCircle, UtensilsCrossed } from 'lucide-react';
+import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple } from 'lucide-react'; // Added X, MapPin, LocateFixed, DollarSign, meal icons
+
+type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 
 interface LogEntry extends EstimateCalorieCountOutput {
   id: string;
   timestamp: number;
   imageUrl: string; // Store the image URL for display in the log
+  foodItem: string; // Editable food item name
+  location?: string; // Optional location
+  mealType?: MealType; // Meal type
+  amount?: number; // Optional amount/cost
 }
 
 export default function CalorieLogger() {
@@ -32,6 +41,13 @@ export default function CalorieLogger() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const { toast } = useToast();
 
+  // State for editable fields
+  const [editedFoodItem, setEditedFoodItem] = useState<string>('');
+  const [location, setLocation] = useState<string>('');
+  const [isFetchingLocation, setIsFetchingLocation] = useState<boolean>(false);
+  const [mealType, setMealType] = useState<MealType | undefined>(undefined);
+  const [amount, setAmount] = useState<string>(''); // Use string for input
+
   // Cleanup camera stream on unmount or when camera is closed
   useEffect(() => {
     return () => {
@@ -41,6 +57,54 @@ export default function CalorieLogger() {
     };
   }, [stream]);
 
+  // Function to fetch current location
+  const fetchCurrentLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      toast({
+        title: "Geolocation Error",
+        description: "Geolocation is not supported by your browser.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsFetchingLocation(true);
+    setLocation('Fetching location...'); // Placeholder
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        // Basic approach: just show coordinates. A real app might use reverse geocoding API.
+        // const locString = `Lat: ${position.coords.latitude.toFixed(4)}, Lon: ${position.coords.longitude.toFixed(4)}`;
+        const locString = "Current Location"; // Simplified for demo
+        setLocation(locString);
+        setIsFetchingLocation(false);
+        toast({
+            title: "Location Fetched",
+            description: "Current location set.",
+        });
+      },
+      (error) => {
+        console.error("Error getting location:", error);
+        let description = "Could not fetch your location.";
+        if (error.code === error.PERMISSION_DENIED) {
+            description = "Location permission denied. Please enable it in your browser settings.";
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+            description = "Location information is unavailable.";
+        } else if (error.code === error.TIMEOUT) {
+            description = "The request to get user location timed out.";
+        }
+        setLocation(''); // Clear placeholder on error
+        setIsFetchingLocation(false);
+        toast({
+          title: "Location Error",
+          description: description,
+          variant: "destructive",
+        });
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } // Options
+    );
+  }, [toast]);
+
   const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -48,8 +112,7 @@ export default function CalorieLogger() {
       reader.onload = (e) => {
         const result = e.target?.result as string;
         setImageSrc(result);
-        setEstimationResult(null); // Clear previous result
-        setError(null); // Clear previous error
+        clearEstimation(); // Clear previous results and fields
         estimateCalories(result); // Start estimation immediately
       };
       reader.readAsDataURL(file);
@@ -63,7 +126,7 @@ export default function CalorieLogger() {
   const openCamera = async () => {
     setError(null);
     setImageSrc(null);
-    setEstimationResult(null);
+    clearEstimation();
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       setStream(mediaStream);
@@ -97,19 +160,15 @@ export default function CalorieLogger() {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      // Set canvas dimensions based on video intrinsic dimensions for correct aspect ratio
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const context = canvas.getContext('2d');
       if (context) {
-        // Draw the current video frame onto the canvas
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        // Get the image data URL from the canvas
-        const dataUri = canvas.toDataURL('image/jpeg'); // Use jpeg for smaller size
+        const dataUri = canvas.toDataURL('image/jpeg');
         setImageSrc(dataUri);
-        setEstimationResult(null);
-        setError(null);
-        closeCamera(); // Close camera after taking picture
+        clearEstimation();
+        closeCamera();
         estimateCalories(dataUri);
       } else {
           setError("Could not get canvas context.");
@@ -121,6 +180,14 @@ export default function CalorieLogger() {
     }
   };
 
+  const clearEstimation = () => {
+     setEstimationResult(null);
+     setError(null);
+     setEditedFoodItem('');
+     setLocation('');
+     setMealType(undefined);
+     setAmount('');
+  }
 
   const estimateCalories = useCallback(async (photoDataUri: string) => {
     setIsLoading(true);
@@ -130,16 +197,17 @@ export default function CalorieLogger() {
     try {
       const result = await estimateCalorieCount({ photoDataUri });
 
-      // Simple check for potentially unclear images based on confidence
-      if (result.confidence < 0.5) { // Threshold can be adjusted
+      if (result.confidence < 0.5) {
          toast({
           title: "Low Confidence Estimation",
-          description: "The image might be unclear, or the food item is difficult to identify. The calorie estimate may be less accurate. Consider taking another picture.",
-          variant: "default", // Use default or a custom "warning" variant if available
+          description: "The image might be unclear, or the food item is difficult to identify. The calorie estimate may be less accurate.",
+          variant: "default",
         });
       }
 
       setEstimationResult(result);
+      setEditedFoodItem(result.foodItem); // Pre-fill editable name
+      fetchCurrentLocation(); // Attempt to fetch location after getting result
 
     } catch (err) {
       console.error("Error estimating calories:", err);
@@ -152,28 +220,33 @@ export default function CalorieLogger() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]); // Add toast dependency
+  }, [toast, fetchCurrentLocation]); // Added fetchCurrentLocation dependency
 
   const logCalories = () => {
-    if (estimationResult && imageSrc) {
+    if (estimationResult && imageSrc && editedFoodItem) { // Ensure editedFoodItem is not empty
+      const parsedAmount = parseFloat(amount);
       const newLogEntry: LogEntry = {
         ...estimationResult,
-        id: Date.now().toString(), // Simple unique ID
+        foodItem: editedFoodItem, // Use the edited name
+        id: Date.now().toString(),
         timestamp: Date.now(),
-        imageUrl: imageSrc, // Store the captured/uploaded image Data URI
+        imageUrl: imageSrc,
+        location: location || undefined, // Use location from state
+        mealType: mealType, // Use meal type from state
+        amount: !isNaN(parsedAmount) ? parsedAmount : undefined, // Use amount from state
       };
-      setCalorieLog([newLogEntry, ...calorieLog]); // Add to the beginning of the log
-      // Clear the current image and result after logging
+      setCalorieLog([newLogEntry, ...calorieLog]);
+      // Clear the current image and results/fields after logging
       setImageSrc(null);
-      setEstimationResult(null);
+      clearEstimation();
        toast({
         title: "Logged Successfully",
-        description: `${estimationResult.foodItem} (${estimationResult.calorieEstimate} kcal) added to your log.`,
+        description: `${editedFoodItem} (${estimationResult.calorieEstimate} kcal) added to your log.`,
       });
     } else {
          toast({
             title: "Log Error",
-            description: "No estimation result to log.",
+            description: !editedFoodItem ? "Food item name cannot be empty." : "No estimation result to log.",
             variant: "destructive",
          });
     }
@@ -189,6 +262,17 @@ export default function CalorieLogger() {
 
   const triggerFileInput = () => {
     fileInputRef.current?.click();
+  };
+
+  // Helper to render meal icon
+  const renderMealIcon = (mealType?: MealType) => {
+    switch (mealType) {
+      case 'Breakfast': return <Coffee className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
+      case 'Lunch': return <Sun className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
+      case 'Dinner': return <Moon className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
+      case 'Snack': return <Apple className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
+      default: return null;
+    }
   };
 
   const renderEstimationResult = () => {
@@ -211,7 +295,7 @@ export default function CalorieLogger() {
                 <p className="text-destructive">{error}</p>
              </CardContent>
              <CardFooter>
-                 <Button variant="destructive" onClick={() => setError(null)}>Dismiss</Button>
+                 <Button variant="destructive" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>Dismiss</Button>
              </CardFooter>
          </Card>
       );
@@ -221,16 +305,88 @@ export default function CalorieLogger() {
       return (
         <Card>
           <CardHeader>
-            <CardTitle>Estimation Result</CardTitle>
+            <CardTitle>Log Details</CardTitle>
+             <CardDescription>Review and edit the details before logging.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
-            <p><strong className="font-medium">Food Item:</strong> {estimationResult.foodItem}</p>
-            <p><strong className="font-medium">Estimated Calories:</strong> {estimationResult.calorieEstimate} kcal</p>
-            <p><strong className="font-medium">Confidence:</strong> {Math.round(estimationResult.confidence * 100)}%</p>
+          <CardContent className="space-y-4">
+            {/* Editable Food Item */}
+            <div className="space-y-1">
+                <Label htmlFor="foodItem">Food Item</Label>
+                <Input
+                    id="foodItem"
+                    value={editedFoodItem}
+                    onChange={(e) => setEditedFoodItem(e.target.value)}
+                    placeholder="e.g., Chicken Salad"
+                />
+            </div>
+
+            {/* Read-only Calorie Estimate & Confidence */}
+             <div className="flex justify-between text-sm">
+                <p><strong className="font-medium">Estimated Calories:</strong> {estimationResult.calorieEstimate} kcal</p>
+                <p><strong className="font-medium">Confidence:</strong> {Math.round(estimationResult.confidence * 100)}%</p>
+            </div>
+
+            {/* Location */}
+            <div className="space-y-1">
+                <Label htmlFor="location">Location</Label>
+                 <div className="flex gap-2 items-center">
+                    <Input
+                        id="location"
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        placeholder="e.g., Home, Office Cafe"
+                        disabled={isFetchingLocation}
+                    />
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={fetchCurrentLocation}
+                        disabled={isFetchingLocation}
+                        title="Fetch Current Location"
+                        >
+                        {isFetchingLocation ? <LoadingSpinner size={16}/> : <LocateFixed className="h-4 w-4" />}
+                    </Button>
+                </div>
+            </div>
+
+            {/* Meal Type */}
+             <div className="space-y-1">
+                <Label>Meal Type</Label>
+                 <RadioGroup value={mealType} onValueChange={(value) => setMealType(value as MealType)} className="flex flex-wrap gap-4 pt-2">
+                    {(['Breakfast', 'Lunch', 'Dinner', 'Snack'] as MealType[]).map((type) => (
+                    <div key={type} className="flex items-center space-x-2">
+                        <RadioGroupItem value={type} id={`meal-${type}`} />
+                        <Label htmlFor={`meal-${type}`} className="font-normal cursor-pointer">
+                            {renderMealIcon(type)} {type}
+                        </Label>
+                    </div>
+                    ))}
+                </RadioGroup>
+            </div>
+
+            {/* Amount/Cost */}
+            <div className="space-y-1">
+                <Label htmlFor="amount">Amount / Cost (Optional)</Label>
+                <div className="relative">
+                     <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        id="amount"
+                        type="number"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        placeholder="e.g., 12.50"
+                        className="pl-8" // Add padding for the icon
+                    />
+                </div>
+            </div>
+
           </CardContent>
           <CardFooter>
-            <Button onClick={logCalories} className="bg-accent text-accent-foreground hover:bg-accent/90">
+            <Button onClick={logCalories} className="bg-accent text-accent-foreground hover:bg-accent/90 w-full md:w-auto" disabled={!editedFoodItem}>
               <PlusCircle className="mr-2 h-4 w-4" /> Log Calories
+            </Button>
+             <Button variant="outline" onClick={() => { setImageSrc(null); clearEstimation(); }} className="ml-2">
+                Cancel
             </Button>
           </CardFooter>
         </Card>
@@ -252,8 +408,8 @@ export default function CalorieLogger() {
           <CardContent className="space-y-4">
              {isCameraOpen && (
                 <div className="relative">
-                    <video ref={videoRef} autoPlay playsInline className="w-full rounded-md border"></video>
-                    <Button onClick={takePicture} className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-accent text-accent-foreground hover:bg-accent/90 rounded-full p-3 h-auto shadow-lg">
+                    <video ref={videoRef} autoPlay playsInline className="w-full rounded-md border aspect-video object-cover"></video>
+                    <Button onClick={takePicture} className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-3 h-auto shadow-lg">
                         <Camera size={24} />
                     </Button>
                      <Button onClick={closeCamera} variant="ghost" size="icon" className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full">
@@ -264,34 +420,38 @@ export default function CalorieLogger() {
              {/* Hidden canvas for capturing frame */}
             <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
 
-            {!isCameraOpen && imageSrc && (
+            {!isCameraOpen && imageSrc && !estimationResult && !isLoading && !error && ( // Only show preview if no result/loading/error
               <div className="relative aspect-video w-full overflow-hidden rounded-md border">
                 <Image src={imageSrc} alt="Selected food item" layout="fill" objectFit="contain" data-ai-hint="food plate"/>
+                 <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full" onClick={() => setImageSrc(null)}>
+                    <X size={18} />
+                </Button>
               </div>
             )}
-             {!isCameraOpen && !imageSrc && (
+             {!isCameraOpen && !imageSrc && !estimationResult && !error && ( // Placeholder when nothing is selected/loading
                  <div className="flex items-center justify-center h-40 border-2 border-dashed rounded-md text-muted-foreground">
                     <p>Preview appears here</p>
                  </div>
             )}
-            <div className="flex gap-2 justify-center">
-             {!isCameraOpen && (
-                <Button onClick={openCamera} variant="outline">
-                    <Camera className="mr-2 h-4 w-4" /> Open Camera
-                </Button>
-             )}
-              <Button onClick={triggerFileInput} variant="outline" disabled={isCameraOpen || isLoading}>
-                {imageSrc ? "Change Photo" : "Upload Photo"}
-              </Button>
-              <Input
-                type="file"
-                accept="image/*"
-                ref={fileInputRef}
-                onChange={handleImageChange}
-                className="hidden"
-                disabled={isCameraOpen || isLoading}
-              />
-            </div>
+             {/* Hide buttons if camera is open OR if there's a result being edited */}
+            {!isCameraOpen && !estimationResult && !isLoading && !error && (
+                <div className="flex gap-2 justify-center">
+                    <Button onClick={openCamera} variant="outline">
+                        <Camera className="mr-2 h-4 w-4" /> Open Camera
+                    </Button>
+                    <Button onClick={triggerFileInput} variant="outline" disabled={isLoading}>
+                        {imageSrc ? "Change Photo" : "Upload Photo"}
+                    </Button>
+                    <Input
+                        type="file"
+                        accept="image/*"
+                        ref={fileInputRef}
+                        onChange={handleImageChange}
+                        className="hidden"
+                        disabled={isLoading}
+                    />
+                </div>
+            )}
           </CardContent>
         </Card>
 
@@ -307,7 +467,7 @@ export default function CalorieLogger() {
             <CardDescription>Recently logged items.</CardDescription>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[400px] pr-4"> {/* Adjust height as needed */}
+            <ScrollArea className="h-[600px] pr-4"> {/* Increased height */}
               {calorieLog.length === 0 ? (
                  <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4">
                     <UtensilsCrossed className="w-12 h-12 mb-4 opacity-50" />
@@ -322,23 +482,46 @@ export default function CalorieLogger() {
                         <Image
                             src={entry.imageUrl}
                             alt={entry.foodItem}
-                            width={64}
-                            height={64}
+                            width={80} // Slightly larger image
+                            height={80}
                             className="rounded-md object-cover aspect-square border"
                             data-ai-hint="food item"
                         />
-                        <div className="flex-1 space-y-1">
-                            <p className="font-medium">{entry.foodItem}</p>
-                            <p className="text-sm text-muted-foreground">{entry.calorieEstimate} kcal</p>
-                            <p className="text-xs text-muted-foreground">
-                                Logged: {new Date(entry.timestamp).toLocaleTimeString()} - {new Date(entry.timestamp).toLocaleDateString()}
-                            </p>
+                        <div className="flex-1 space-y-1.5"> {/* Increased spacing */}
+                            <p className="font-semibold text-base">{entry.foodItem}</p> {/* Larger font */}
+                            <p className="text-sm text-primary">{entry.calorieEstimate} kcal</p> {/* Highlight calories */}
+
+                            {/* Display Meal Type, Location, and Amount if available */}
+                             <div className="text-xs text-muted-foreground space-y-0.5">
+                                {entry.mealType && (
+                                    <div className="flex items-center">
+                                        {renderMealIcon(entry.mealType)}
+                                        <span>{entry.mealType}</span>
+                                    </div>
+                                )}
+                                {entry.location && (
+                                    <div className="flex items-center">
+                                        <MapPin className="h-3.5 w-3.5 inline-block mr-1" />
+                                        <span>{entry.location}</span>
+                                    </div>
+                                )}
+                                {entry.amount !== undefined && (
+                                    <div className="flex items-center">
+                                        <DollarSign className="h-3.5 w-3.5 inline-block mr-1" />
+                                        <span>{entry.amount.toFixed(2)}</span>
+                                    </div>
+                                )}
+                                <p>
+                                    Logged: {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(entry.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                </p>
+                             </div>
+
                         </div>
                         <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => deleteLogEntry(entry.id)}
-                            className="text-destructive hover:bg-destructive/10"
+                            className="text-destructive hover:bg-destructive/10 mt-1" // Align button slightly lower
                         >
                           <Trash2 className="h-4 w-4" />
                           <span className="sr-only">Delete entry</span>
@@ -356,3 +539,6 @@ export default function CalorieLogger() {
     </div>
   );
 }
+
+// Add X icon if not already imported (ensure it's available)
+// import { X } from 'lucide-react'; // Example - already added above
