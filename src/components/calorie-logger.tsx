@@ -27,7 +27,8 @@ import {
   DollarSign,
   Info,
   Settings,
-  Apple
+  Apple,
+  CalendarDays
 } from 'lucide-react';
 import {
   Tabs,
@@ -64,6 +65,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Calendar } from "@/components/ui/calendar"; // Import Calendar component
+import { format, isSameDay, startOfDay } from 'date-fns'; // Import date-fns helpers
+import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -166,7 +170,7 @@ const calculateRecommendedWater = (profile: UserProfile): number | null => {
 
 // Function to get current date as YYYY-MM-DD
 const getCurrentDate = (): string => {
-    return new Date().toISOString().split('T')[0];
+    return format(new Date(), 'yyyy-MM-dd'); // Use date-fns format
 };
 
 
@@ -195,6 +199,7 @@ export default function CalorieLogger() {
   const imgRef = useRef<HTMLImageElement>(null);
   const [aspect, setAspect] = useState<number | undefined>(undefined); // Aspect ratio for crop - undefined for free crop
   const [isClient, setIsClient] = useState(false); // State for client-side rendering check
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(startOfDay(new Date())); // State for calendar date selection
 
 
   const { toast } = useToast();
@@ -540,7 +545,8 @@ export default function CalorieLogger() {
           // Display warning if not a food item, but allow logging
           if (!result.isFoodItem) {
              toast({
-                variant: "orange", // Use the new orange variant if available, or default/warning
+                // Use the custom orange variant defined in ui/alert.tsx
+                variant: "orange" as any, // Cast to any to bypass type check for custom variant
                 title: "注意：可能不是食物",
                 description: `偵測到的項目「${result.foodItem}」可能不是食物。您仍然可以記錄它，但請仔細檢查卡路里。`,
              });
@@ -975,9 +981,17 @@ export default function CalorieLogger() {
 );
 
 
+ // Filter logs for the selected date
+ const filteredLog = useMemo(() => {
+    if (!selectedDate) return [];
+    return calorieLog.filter(entry => {
+        if (!entry || !entry.timestamp) return false;
+        const entryDate = new Date(entry.timestamp);
+        return isValidDate(entryDate) && isSameDay(entryDate, selectedDate);
+    });
+ }, [calorieLog, selectedDate]);
+
  const renderLogList = () => {
-
-
      // Check for localStorage errors and display a persistent warning if needed
      const renderStorageError = () => {
         if (!isClient) return null; // Only render errors on client
@@ -1006,26 +1020,29 @@ export default function CalorieLogger() {
          );
      };
 
-
     if (!isClient) {
         // Render placeholder or loading state on the server
         return (
              <div className="mt-6">
-                <h2 className="text-2xl font-semibold mb-4 text-primary">卡路里記錄摘要</h2>
+                <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center gap-2"><CalendarDays size={24}/> 卡路里記錄摘要</h2>
+                <div className="mb-4 flex justify-center">
+                    {/* Calendar Placeholder */}
+                    <Skeleton className="h-[300px] w-[350px] rounded-md" />
+                </div>
                 <div className="space-y-4">
-                    {[...Array(3)].map((_, i) => (
+                    {[...Array(2)].map((_, i) => ( // Reduced placeholder count
                          <Card key={i} className="mb-4 opacity-50 animate-pulse">
                             <CardHeader className="p-4">
                                 <div className="flex items-start space-x-4">
-                                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-md bg-muted border flex-shrink-0"></div>
+                                    <Skeleton className="w-16 h-16 sm:w-20 sm:h-20 rounded-md flex-shrink-0"/>
                                     <div className="flex-grow space-y-2">
-                                        <div className="h-4 bg-muted rounded w-3/4"></div>
-                                        <div className="h-3 bg-muted rounded w-1/2"></div>
-                                        <div className="h-3 bg-muted rounded w-5/6"></div>
+                                        <Skeleton className="h-4 rounded w-3/4"/>
+                                        <Skeleton className="h-3 rounded w-1/2"/>
+                                        <Skeleton className="h-3 rounded w-5/6"/>
                                     </div>
                                      <div className="flex flex-col sm:flex-row items-center gap-1 ml-auto flex-shrink-0">
-                                         <div className="h-8 w-8 bg-muted rounded"></div>
-                                         <div className="h-8 w-8 bg-muted rounded"></div>
+                                         <Skeleton className="h-8 w-8 rounded"/>
+                                         <Skeleton className="h-8 w-8 rounded"/>
                                      </div>
                                 </div>
                             </CardHeader>
@@ -1036,44 +1053,80 @@ export default function CalorieLogger() {
         );
     }
 
-    if (calorieLog.length === 0) {
-      return (
-        <div className="text-center text-muted-foreground py-10 mt-6">
-           {renderStorageError()}
-          <UtensilsCrossed className="mx-auto h-12 w-12 opacity-50 mb-4" />
-          <p>尚未記錄任何卡路里。</p>
-          <p>使用上方的相機或上傳按鈕開始記錄！</p>
-        </div>
-      );
-    }
-
-    // Group by date
-    const groupedLog = calorieLog.reduce((acc, entry) => {
-      if (!entry || !entry.timestamp) return acc; // Skip invalid entries
-      const date = new Date(entry.timestamp).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
-      if (!acc[date]) {
-        acc[date] = [];
-      }
-      acc[date].push(entry);
-      return acc;
-    }, {} as Record<string, CalorieLogEntry[]>);
+    // Calculate which days have logs for highlighting in the calendar
+    const loggedDays = useMemo(() => {
+        if (!isClient) return []; // Don't compute on server
+        const daysWithLogs = new Set<string>();
+        calorieLog.forEach(entry => {
+            if (entry && entry.timestamp) {
+                const date = startOfDay(new Date(entry.timestamp));
+                if (isValidDate(date)) {
+                    daysWithLogs.add(format(date, 'yyyy-MM-dd'));
+                }
+            }
+        });
+        return Array.from(daysWithLogs).map(dateStr => new Date(dateStr));
+    }, [calorieLog, isClient]);
 
 
     return (
         <div className="mt-6">
             {renderStorageError()}
-            <h2 className="text-2xl font-semibold mb-4 text-primary">卡路里記錄摘要</h2>
-             {Object.entries(groupedLog).map(([date, entries]) => (
-                <div key={date} className="mb-6">
-                    <h3 className="text-lg font-medium mb-3 border-b pb-1 text-muted-foreground">{date}</h3>
-                     <div className="space-y-4">
-                        {entries.map(renderLogEntry)}
-                    </div>
+            <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center gap-2"><CalendarDays size={24}/> 卡路里記錄摘要</h2>
+
+            <div className="mb-6 flex justify-center">
+                <Calendar
+                   mode="single"
+                   selected={selectedDate}
+                   onSelect={setSelectedDate}
+                   className="rounded-md border shadow-sm"
+                   disabled={date => date > new Date() || date < new Date("1900-01-01")} // Disable future dates
+                   initialFocus
+                   locale={require('date-fns/locale/zh-TW')} // Use Traditional Chinese locale
+                   modifiers={{ logged: loggedDays }} // Add modifier for logged days
+                   modifiersStyles={{
+                       logged: { fontWeight: 'bold', color: 'hsl(var(--primary))' }, // Style for days with logs
+                   }}
+                />
+            </div>
+
+            {selectedDate && (
+                <div>
+                    <h3 className="text-lg font-medium mb-3 border-b pb-1 text-muted-foreground">
+                         {format(selectedDate, 'yyyy 年 MM 月 dd 日', { locale: require('date-fns/locale/zh-TW') })} 的記錄
+                    </h3>
+                    {filteredLog.length > 0 ? (
+                        <div className="space-y-4">
+                            {filteredLog.map(renderLogEntry)}
+                        </div>
+                    ) : (
+                        <div className="text-center text-muted-foreground py-6">
+                            <UtensilsCrossed className="mx-auto h-10 w-10 opacity-40 mb-3" />
+                            <p>這天沒有記錄任何卡路里。</p>
+                        </div>
+                    )}
                 </div>
-             ))}
+            )}
+
+            {/* Fallback if no date is selected (shouldn't happen with default) */}
+            {!selectedDate && calorieLog.length > 0 && (
+                 <div className="text-center text-muted-foreground py-6">
+                     <p>請在日曆上選擇一天以查看記錄。</p>
+                 </div>
+            )}
+
+             {/* Show initial message if no logs exist at all */}
+             {calorieLog.length === 0 && (
+                 <div className="text-center text-muted-foreground py-10 mt-6">
+                     <UtensilsCrossed className="mx-auto h-12 w-12 opacity-50 mb-4" />
+                     <p>尚未記錄任何卡路里。</p>
+                     <p>使用上方的相機或上傳按鈕開始記錄！</p>
+                 </div>
+             )}
         </div>
     );
 };
+
 
 
  const renderWaterTracker = () => (
@@ -1614,3 +1667,5 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
+
+    
