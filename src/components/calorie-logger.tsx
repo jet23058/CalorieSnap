@@ -4,7 +4,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Image from 'next/image';
 import { estimateCalorieCount, type EstimateCalorieCountOutput } from '@/ai/flows/estimate-calorie-count';
-import useLocalStorage, { LocalStorageError } from '@/hooks/use-local-storage'; // Import error class
+import useLocalStorage, { LocalStorageError } from '@/hooks/use-local-storage'; // Import LocalStorageError
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,9 +14,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingSpinner } from '@/components/loading-spinner';
-import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff } from 'lucide-react'; // Added ImageOff
+import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff } from 'lucide-react';
 
-type MealType = '早餐' | '午餐' | '晚餐' | '點心'; // Translated Meal Types
+type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
+const mealTypeTranslations: Record<MealType, string> = {
+    Breakfast: '早餐',
+    Lunch: '午餐',
+    Dinner: '晚餐',
+    Snack: '點心',
+};
+
 
 // Interface for the data stored in localStorage - remove imageUrl
 interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem'> {
@@ -69,42 +76,42 @@ export default function CalorieLogger() {
   const fetchCurrentLocation = useCallback(() => {
     if (!navigator.geolocation) {
       toast({
-        title: "地理位置錯誤", // Translated
-        description: "您的瀏覽器不支援地理位置功能。", // Translated
+        title: "地理位置錯誤",
+        description: "您的瀏覽器不支援地理位置功能。",
         variant: "destructive",
       });
       return;
     }
 
     setIsFetchingLocation(true);
-    setLocation('正在取得位置...'); // Translated
+    setLocation('正在取得地點...'); // Placeholder
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         // Basic approach: just show coordinates. A real app might use reverse geocoding API.
-        // const locString = `Lat: ${position.coords.latitude.toFixed(4)}, Lon: ${position.coords.longitude.toFixed(4)}`;
-        const locString = "目前位置"; // Simplified for demo - Translated
+        // const locString = `緯度: ${position.coords.latitude.toFixed(4)}, 經度: ${position.coords.longitude.toFixed(4)}`;
+        const locString = "目前位置"; // Simplified for demo
         setLocation(locString);
         setIsFetchingLocation(false);
         toast({
-            title: "已取得位置", // Translated
-            description: "已設定目前位置。", // Translated
+            title: "地點已取得",
+            description: "已設定目前位置。",
         });
       },
       (error) => {
-        console.error("取得位置時發生錯誤:", error); // Translated
-        let description = "無法取得您的位置。"; // Translated
+        console.error("取得地點時發生錯誤:", error);
+        let description = "無法取得您的地點。";
         if (error.code === error.PERMISSION_DENIED) {
-            description = "地點權限遭拒。請在您的瀏覽器設定中啟用。"; // Translated
+            description = "地點權限遭拒。請在瀏覽器設定中啟用。";
         } else if (error.code === error.POSITION_UNAVAILABLE) {
-            description = "無法取得地點資訊。"; // Translated
+            description = "無法取得地點資訊。";
         } else if (error.code === error.TIMEOUT) {
-            description = "取得使用者位置的要求已逾時。"; // Translated
+            description = "取得使用者地點的要求已逾時。";
         }
         setLocation(''); // Clear placeholder on error
         setIsFetchingLocation(false);
         toast({
-          title: "地點錯誤", // Translated
+          title: "地點錯誤",
           description: description,
           variant: "destructive",
         });
@@ -144,11 +151,11 @@ export default function CalorieLogger() {
       }
       setIsCameraOpen(true);
     } catch (err) {
-      console.error("無法存取相機:", err); // Translated
-      setError("無法存取相機。請檢查權限。"); // Translated
+      console.error("存取相機時發生錯誤:", err);
+      setError("無法存取相機。請檢查權限。");
       toast({
-        title: "相機錯誤", // Translated
-        description: "無法存取相機。請確認已授予權限。", // Translated
+        title: "相機錯誤",
+        description: "無法存取相機。請確保已授予權限。",
         variant: "destructive",
       });
     }
@@ -183,12 +190,12 @@ export default function CalorieLogger() {
         closeCamera();
         estimateCalories(dataUri);
       } else {
-          setError("無法取得畫布內容。"); // Translated
-          toast({ title: "拍攝錯誤", description: "無法從相機拍攝影像。", variant: "destructive" }); // Translated
+          setError("無法取得畫布內容。");
+          toast({ title: "拍攝錯誤", description: "無法從相機拍攝影像。", variant: "destructive" });
       }
     } else {
-        setError("相機或畫布尚未就緒。"); // Translated
-        toast({ title: "拍攝錯誤", description: "相機畫面無法使用。", variant: "destructive" }); // Translated
+        setError("相機或畫布尚未就緒。");
+        toast({ title: "拍攝錯誤", description: "相機畫面無法使用。", variant: "destructive" });
     }
   };
 
@@ -209,7 +216,7 @@ export default function CalorieLogger() {
     try {
       // Add check for data URI length before sending? (Future enhancement)
       if (photoDataUri.length > 4 * 1024 * 1024) { // Example: Check if > ~4MB
-          console.warn("圖片資料 URI 可能過大。"); // Translated
+          console.warn("影像資料 URI 可能過大。");
           // Potentially resize/compress before sending to AI
       }
 
@@ -217,8 +224,8 @@ export default function CalorieLogger() {
 
       if (result.confidence < 0.5) {
          toast({
-          title: "低信賴度估計", // Translated
-          description: "影像可能不清楚，或食物項目難以識別。卡路里估計可能較不準確。", // Translated
+          title: "低信賴度估計",
+          description: "影像可能不清晰，或難以辨識食物品項。卡路里估計值可能較不準確。",
           variant: "default",
           duration: 5000, // Show longer
         });
@@ -229,19 +236,19 @@ export default function CalorieLogger() {
       fetchCurrentLocation(); // Attempt to fetch location after getting result
 
     } catch (err) {
-      console.error("估算卡路里時發生錯誤:", err); // Translated
-      let errorMsg = "無法估算卡路里。請再試一次。"; // Translated
+      console.error("估計卡路里時發生錯誤:", err);
+      let errorMsg = "無法估計卡路里。請再試一次。";
       if (err instanceof Error) {
         // Check for specific known error types if possible
          if (err.message.includes("quota") || err.message.includes("size")) {
-            errorMsg = "無法估算卡路里。影像可能太大或網路發生問題。"; // Translated
+            errorMsg = "無法估計卡路里。影像可能太大或發生網路問題。";
          } else {
-             errorMsg = `無法估算卡路里：${err.message}`; // Translated
+             errorMsg = `無法估計卡路里: ${err.message}`;
          }
       }
       setError(errorMsg);
        toast({
-        title: "估計失敗", // Translated
+        title: "估計失敗",
         description: errorMsg,
         variant: "destructive",
       });
@@ -280,53 +287,55 @@ export default function CalorieLogger() {
           setImageSrc(null);
           clearEstimation();
           toast({
-              title: "記錄成功", // Translated
-              description: `${editedFoodItem} (${estimationResult.calorieEstimate} 大卡) 已新增至您的記錄。`, // Translated
+              title: "記錄成功",
+              description: `${editedFoodItem} (${estimationResult.calorieEstimate} 大卡) 已新增至您的記錄中。`,
           });
       } catch (e) {
-           console.error("儲存至 localStorage 時發生錯誤:", e); // Translated
-            // Check if the error is the custom LocalStorageError for quota exceeded
-            if (e instanceof LocalStorageError && e.message.includes("quota exceeded")) {
+           console.error("儲存至 localStorage 時發生錯誤:", e);
+
+           // Check if it's our custom LocalStorageError related to quota
+           if (e instanceof LocalStorageError && e.message.includes('quota exceeded')) {
                  toast({
-                    title: "記錄錯誤", // Translated
-                    description: "無法儲存項目。儲存空間可能已滿。", // Translated
+                    title: "記錄錯誤",
+                    description: "無法儲存此項目。儲存空間可能已滿。",
                     variant: "destructive",
-                 });
-                 // Attempt to clear older entries
-                 console.warn("LocalStorage 配額已滿。正在嘗試清除較舊的項目..."); // Translated
+                });
+               // Optionally: Attempt to clear older entries if quota is exceeded
+                console.warn("LocalStorage 配額已滿。嘗試清除較舊的項目...");
                  try {
+                     const MAX_LOG_ENTRIES = 100;
                      const trimmedLog = calorieLog.slice(0, Math.floor(MAX_LOG_ENTRIES * 0.8)); // Keep 80%
-                     setCalorieLog([newLogEntry, ...trimmedLog].slice(0, MAX_LOG_ENTRIES));
+                     setCalorieLog([newLogEntry, ...trimmedLog].slice(0, MAX_LOG_ENTRIES)); // Retry adding the new entry
                       toast({
-                          title: "記錄成功 (已清除儲存空間)", // Translated
-                          description: `已清除較舊的項目以騰出空間。${editedFoodItem} 已新增。`, // Translated
+                          title: "記錄成功 (已清除儲存空間)",
+                          description: `已清除較舊的項目以騰出空間。已新增 ${editedFoodItem}。`,
                           variant: 'default',
                           duration: 6000,
                       });
                       setImageSrc(null);
                       clearEstimation();
                  } catch (finalError) {
-                     console.error("即使清除後仍無法儲存:", finalError); // Translated
+                     console.error("即使清除後仍無法儲存:", finalError);
                      toast({
-                         title: "記錄錯誤", // Translated
-                         description: "即使清除空間後仍無法儲存項目。請手動清除一些記錄。", // Translated
+                         title: "記錄錯誤",
+                         description: "即使清除空間後仍無法儲存項目。請手動清除部分記錄。",
                          variant: "destructive",
                      });
                  }
-            } else {
-                // Handle other types of errors
-                 toast({
-                    title: "記錄錯誤", // Translated
-                    description: `無法儲存項目: ${e instanceof Error ? e.message : '未知錯誤'}`, // Provide more details if available - Translated
+           } else {
+               // Handle other potential errors during setCalorieLog or JSON stringify
+                toast({
+                    title: "記錄錯誤",
+                    description: "儲存項目時發生未預期的錯誤。",
                     variant: "destructive",
                 });
-            }
+           }
       }
 
     } else {
          toast({
-            title: "記錄錯誤", // Translated
-            description: !editedFoodItem ? "食物項目名稱不能為空。" : "沒有可記錄的估計結果。", // Translated
+            title: "記錄錯誤",
+            description: !editedFoodItem ? "食物品項名稱不可為空。" : "沒有可記錄的估計結果。",
             variant: "destructive",
          });
     }
@@ -335,8 +344,8 @@ export default function CalorieLogger() {
   const deleteLogEntry = (id: string) => {
     setCalorieLog(calorieLog.filter(entry => entry.id !== id));
      toast({
-        title: "記錄項目已刪除", // Translated
-        description: "所選項目已從您的記錄中移除。", // Translated
+        title: "記錄項目已刪除",
+        description: "所選項目已從您的記錄中移除。",
       });
   };
 
@@ -347,10 +356,10 @@ export default function CalorieLogger() {
   // Helper to render meal icon
   const renderMealIcon = (mealType?: MealType) => {
     switch (mealType) {
-      case '早餐': return <Coffee className="h-4 w-4 inline-block mr-1 text-muted-foreground" />; // Translated
-      case '午餐': return <Sun className="h-4 w-4 inline-block mr-1 text-muted-foreground" />; // Translated
-      case '晚餐': return <Moon className="h-4 w-4 inline-block mr-1 text-muted-foreground" />; // Translated
-      case '點心': return <Apple className="h-4 w-4 inline-block mr-1 text-muted-foreground" />; // Translated
+      case 'Breakfast': return <Coffee className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
+      case 'Lunch': return <Sun className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
+      case 'Dinner': return <Moon className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
+      case 'Snack': return <Apple className="h-4 w-4 inline-block mr-1 text-muted-foreground" />;
       default: return null;
     }
   };
@@ -360,7 +369,7 @@ export default function CalorieLogger() {
       return (
         <div className="flex flex-col items-center justify-center p-6 space-y-2">
           <LoadingSpinner size={32} />
-          <p className="text-muted-foreground">正在估算卡路里...</p> {/* Translated */}
+          <p className="text-muted-foreground">正在估計卡路里...</p>
         </div>
       );
     }
@@ -369,13 +378,13 @@ export default function CalorieLogger() {
       return (
          <Card className="border-destructive bg-destructive/10">
              <CardHeader>
-                 <CardTitle className="text-destructive">估計錯誤</CardTitle> {/* Translated */}
+                 <CardTitle className="text-destructive">估計錯誤</CardTitle>
              </CardHeader>
              <CardContent>
                 <p className="text-destructive-foreground">{error}</p> {/* Ensure text is readable */}
              </CardContent>
              <CardFooter>
-                 <Button variant="destructive" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button> {/* Translated */}
+                 <Button variant="destructive" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button>
              </CardFooter>
          </Card>
       );
@@ -385,43 +394,43 @@ export default function CalorieLogger() {
       return (
         <Card>
           <CardHeader>
-            <CardTitle>記錄詳細資料</CardTitle> {/* Translated */}
-             <CardDescription>在記錄前檢閱並編輯詳細資料。</CardDescription> {/* Translated */}
+            <CardTitle>記錄詳細資訊</CardTitle>
+             <CardDescription>記錄前請檢視並編輯詳細資訊。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Preview Image (optional, not stored) */}
             {imageSrc && (
                 <div className="relative aspect-video w-full overflow-hidden rounded-md border mb-4">
-                  <Image src={imageSrc} alt="食物項目預覽" layout="fill" objectFit="contain" data-ai-hint="food plate"/> {/* Translated */}
+                  <Image src={imageSrc} alt="食物品項預覽" layout="fill" objectFit="contain" data-ai-hint="食物 盤子"/>
                 </div>
             )}
 
             {/* Editable Food Item */}
             <div className="space-y-1">
-                <Label htmlFor="foodItem">食物項目</Label> {/* Translated */}
+                <Label htmlFor="foodItem">食物品項</Label>
                 <Input
                     id="foodItem"
                     value={editedFoodItem}
                     onChange={(e) => setEditedFoodItem(e.target.value)}
-                    placeholder="例如：雞肉沙拉" // Translated
+                    placeholder="例如：雞肉沙拉"
                 />
             </div>
 
             {/* Read-only Calorie Estimate & Confidence */}
              <div className="flex justify-between text-sm">
-                <p><strong className="font-medium">估計卡路里：</strong> {estimationResult.calorieEstimate} 大卡</p> {/* Translated */}
-                <p><strong className="font-medium">信賴度：</strong> {Math.round(estimationResult.confidence * 100)}%</p> {/* Translated */}
+                <p><strong className="font-medium">估計卡路里：</strong> {estimationResult.calorieEstimate} 大卡</p>
+                <p><strong className="font-medium">信賴度：</strong> {Math.round(estimationResult.confidence * 100)}%</p>
             </div>
 
             {/* Location */}
             <div className="space-y-1">
-                <Label htmlFor="location">地點</Label> {/* Translated */}
+                <Label htmlFor="location">地點</Label>
                  <div className="flex gap-2 items-center">
                     <Input
                         id="location"
                         value={location}
                         onChange={(e) => setLocation(e.target.value)}
-                        placeholder="例如：家裡、公司咖啡廳" // Translated
+                        placeholder="例如：家裡、辦公室咖啡廳"
                         disabled={isFetchingLocation}
                     />
                     <Button
@@ -429,7 +438,7 @@ export default function CalorieLogger() {
                         size="icon"
                         onClick={fetchCurrentLocation}
                         disabled={isFetchingLocation}
-                        title="取得目前位置" // Translated
+                        title="取得目前位置"
                         >
                         {isFetchingLocation ? <LoadingSpinner size={16}/> : <LocateFixed className="h-4 w-4" />}
                     </Button>
@@ -438,13 +447,13 @@ export default function CalorieLogger() {
 
             {/* Meal Type */}
              <div className="space-y-1">
-                <Label>餐點類型</Label> {/* Translated */}
+                <Label>餐點類型</Label>
                  <RadioGroup value={mealType} onValueChange={(value) => setMealType(value as MealType)} className="flex flex-wrap gap-4 pt-2">
-                    {(['早餐', '午餐', '晚餐', '點心'] as MealType[]).map((type) => ( // Translated
+                    {(['Breakfast', 'Lunch', 'Dinner', 'Snack'] as MealType[]).map((type) => (
                     <div key={type} className="flex items-center space-x-2">
                         <RadioGroupItem value={type} id={`meal-${type}`} />
                         <Label htmlFor={`meal-${type}`} className="font-normal cursor-pointer">
-                            {renderMealIcon(type)} {type}
+                            {renderMealIcon(type)} {mealTypeTranslations[type]} {/* Use translated text */}
                         </Label>
                     </div>
                     ))}
@@ -453,7 +462,7 @@ export default function CalorieLogger() {
 
             {/* Amount/Cost */}
             <div className="space-y-1">
-                <Label htmlFor="amount">金額 / 成本 (選填)</Label> {/* Translated */}
+                <Label htmlFor="amount">金額 / 費用 (選填)</Label>
                 <div className="relative">
                      <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -461,7 +470,7 @@ export default function CalorieLogger() {
                         type="number"
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
-                        placeholder="例如：12.50" // Translated
+                        placeholder="例如：12.50"
                         className="pl-8" // Add padding for the icon
                         step="0.01" // Allow decimals
                     />
@@ -472,10 +481,10 @@ export default function CalorieLogger() {
           <CardFooter className="flex-col sm:flex-row gap-2">
             <Button onClick={logCalories} className="bg-accent text-accent-foreground hover:bg-accent/90 w-full sm:w-auto" disabled={!editedFoodItem || isLoading}>
               {isLoading ? <LoadingSpinner size={16} className="mr-2"/> : <PlusCircle className="mr-2 h-4 w-4" />}
-               記錄卡路里 {/* Translated */}
+               記錄卡路里
             </Button>
              <Button variant="outline" onClick={() => { setImageSrc(null); clearEstimation(); }} className="w-full sm:w-auto">
-                取消 {/* Translated */}
+                取消
             </Button>
           </CardFooter>
         </Card>
@@ -491,17 +500,17 @@ export default function CalorieLogger() {
       <div className="md:w-1/2 space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle>拍攝或上傳食物照片</CardTitle> {/* Translated */}
-            <CardDescription>使用您的相機或上傳圖片來估算卡路里。</CardDescription> {/* Translated */}
+            <CardTitle>拍攝或上傳食物照片</CardTitle>
+            <CardDescription>使用相機或上傳圖片來估計卡路里。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
              {isCameraOpen && (
                 <div className="relative">
                     <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-md border aspect-video object-cover bg-muted"></video> {/* Added muted and bg-muted */}
-                    <Button onClick={takePicture} className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-3 h-auto shadow-lg z-10" aria-label="拍攝照片"> {/* Translated */}
+                    <Button onClick={takePicture} className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-3 h-auto shadow-lg z-10" aria-label="拍攝照片">
                         <Camera size={24} />
                     </Button>
-                     <Button onClick={closeCamera} variant="ghost" size="icon" className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full z-10" aria-label="關閉相機"> {/* Translated */}
+                     <Button onClick={closeCamera} variant="ghost" size="icon" className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full z-10" aria-label="關閉相機">
                         <X size={18} />
                     </Button>
                 </div>
@@ -511,25 +520,25 @@ export default function CalorieLogger() {
 
             {!isCameraOpen && imageSrc && !estimationResult && !isLoading && !error && ( // Show preview only when relevant
               <div className="relative aspect-video w-full overflow-hidden rounded-md border">
-                <Image src={imageSrc} alt="選取的食物項目" layout="fill" objectFit="contain" data-ai-hint="food plate"/> {/* Translated */}
-                 <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full" onClick={() => setImageSrc(null)} aria-label="清除圖片"> {/* Translated */}
+                <Image src={imageSrc} alt="選取的食物品項" layout="fill" objectFit="contain" data-ai-hint="食物 盤子"/>
+                 <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full" onClick={() => setImageSrc(null)} aria-label="清除影像">
                     <X size={18} />
                 </Button>
               </div>
             )}
              {!isCameraOpen && !imageSrc && !estimationResult && !isLoading && !error && ( // Placeholder
                  <div className="flex items-center justify-center h-40 border-2 border-dashed rounded-md text-muted-foreground bg-muted/50"> {/* Added background */}
-                    <p>預覽會顯示在這裡</p> {/* Translated */}
+                    <p>預覽畫面會顯示在此</p>
                  </div>
             )}
              {/* Buttons area */}
             {!isCameraOpen && !estimationResult && !isLoading && !error && (
                 <div className="flex gap-2 justify-center pt-2">
                     <Button onClick={openCamera} variant="outline" disabled={isLoading}>
-                        <Camera className="mr-2 h-4 w-4" /> 開啟相機 {/* Translated */}
+                        <Camera className="mr-2 h-4 w-4" /> 開啟相機
                     </Button>
                     <Button onClick={triggerFileInput} variant="outline" disabled={isLoading}>
-                        {imageSrc ? "更換照片" : "上傳照片"} {/* Translated */}
+                        {imageSrc ? "更換照片" : "上傳照片"}
                     </Button>
                     <Input
                         type="file"
@@ -546,13 +555,13 @@ export default function CalorieLogger() {
              {isLoading && !estimationResult && (
                 <div className="flex flex-col items-center justify-center p-6 space-y-2">
                     <LoadingSpinner size={32} />
-                    <p className="text-muted-foreground">正在估算卡路里...</p> {/* Translated */}
+                    <p className="text-muted-foreground">正在估計卡路里...</p>
                 </div>
              )}
             {error && !estimationResult && (
                  <div className="mt-4 p-4 border border-destructive bg-destructive/10 rounded-md text-destructive-foreground"> {/* Ensure text is readable */}
                     <p>{error}</p>
-                    <Button variant="link" size="sm" className="text-destructive-foreground underline mt-1 p-0 h-auto" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button> {/* Translated */}
+                    <Button variant="link" size="sm" className="text-destructive-foreground underline mt-1 p-0 h-auto" onClick={() => { setError(null); clearEstimation(); setImageSrc(null); }}>關閉</Button> {/* Use link for dismiss */}
                  </div>
              )}
           </CardContent>
@@ -567,16 +576,16 @@ export default function CalorieLogger() {
       <div className="md:w-1/2 space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle>您的卡路里記錄</CardTitle> {/* Translated */}
-            <CardDescription>最近記錄的項目。</CardDescription> {/* Translated */}
+            <CardTitle>您的卡路里記錄</CardTitle>
+            <CardDescription>最近記錄的項目。</CardDescription>
           </CardHeader>
           <CardContent>
             <ScrollArea className="h-[600px] pr-4">
               {calorieLog.length === 0 ? (
                  <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4">
                     <UtensilsCrossed className="w-12 h-12 mb-4 opacity-50" />
-                    <p>您的卡路里記錄是空的。</p> {/* Translated */}
-                    <p>拍張照片開始記錄吧！</p> {/* Translated */}
+                    <p>您的卡路里記錄是空的。</p>
+                    <p>拍張照片開始記錄吧！</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -586,7 +595,7 @@ export default function CalorieLogger() {
                       <div className="flex items-start space-x-4">
                         {/* Placeholder for Image - Since we removed imageUrl from storage */}
                         <div className="w-[80px] h-[80px] flex items-center justify-center rounded-md bg-muted border text-muted-foreground">
-                           <ImageOff size={32} aria-label="沒有可用的圖片"/> {/* Translated */}
+                           <ImageOff size={32} aria-label="無可用影像"/>
                         </div>
                         {/* Original Image component commented out */}
                         {/* <Image
@@ -595,17 +604,17 @@ export default function CalorieLogger() {
                             width={80}
                             height={80}
                             className="rounded-md object-cover aspect-square border"
-                            data-ai-hint="food item"
+                            data-ai-hint="食物 品項"
                         /> */}
                         <div className="flex-1 space-y-1.5">
                             <p className="font-semibold text-base">{entry.foodItem}</p>
-                            <p className="text-sm text-primary">{entry.calorieEstimate} 大卡</p> {/* Translated */}
+                            <p className="text-sm text-primary">{entry.calorieEstimate} 大卡</p>
 
                              <div className="text-xs text-muted-foreground space-y-0.5">
                                 {entry.mealType && (
                                     <div className="flex items-center">
                                         {renderMealIcon(entry.mealType)}
-                                        <span>{entry.mealType}</span>
+                                        <span>{mealTypeTranslations[entry.mealType]}</span> {/* Use translated text */}
                                     </div>
                                 )}
                                 {entry.location && (
@@ -622,7 +631,7 @@ export default function CalorieLogger() {
                                     </div>
                                 )}
                                 <p>
-                                    記錄時間：{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(entry.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })} {/* Translated */}
+                                    記錄時間： {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(entry.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                                 </p>
                              </div>
 
@@ -632,7 +641,7 @@ export default function CalorieLogger() {
                             size="icon"
                             onClick={() => deleteLogEntry(entry.id)}
                             className="text-destructive hover:bg-destructive/10 mt-1 shrink-0" // Added shrink-0
-                            aria-label={`刪除 ${entry.foodItem} 的記錄項目`} // Translated
+                            aria-label={`刪除 ${entry.foodItem} 的記錄項目`}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

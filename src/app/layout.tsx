@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: '卡路里快拍', // Changed title to Traditional Chinese
-  description: '拍下您的食物照片，估算其卡路里。', // Changed description to Traditional Chinese
+  title: '卡路里快照', // Translated title
+  description: '拍張照片即可估算食物卡路里', // Translated description
 };
 
 export default function RootLayout({
@@ -24,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-TW"> {/* Changed lang to zh-TW */}
+    <html lang="zh-Hant"> {/* Set language to Traditional Chinese */}
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
         <Toaster /> {/* Add Toaster here */}

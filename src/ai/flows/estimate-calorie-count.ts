@@ -1,10 +1,10 @@
 'use server';
 /**
- * @fileOverview A calorie estimation AI agent.
+ * @fileOverview 卡路里估計 AI 代理。
  *
- * - estimateCalorieCount - A function that handles the calorie estimation process.
- * - EstimateCalorieCountInput - The input type for the estimateCalorieCount function.
- * - EstimateCalorieCountOutput - The return type for the estimateCalorieCount function.
+ * - estimateCalorieCount - 處理卡路里估計流程的函數。
+ * - EstimateCalorieCountInput - estimateCalorieCount 函數的輸入類型。
+ * - EstimateCalorieCountOutput - estimateCalorieCount 函數的返回類型。
  */
 
 import {ai} from '@/ai/ai-instance';
@@ -14,15 +14,15 @@ const EstimateCalorieCountInputSchema = z.object({
   photoDataUri: z
     .string()
     .describe(
-      "A photo of a food item, as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
+      "食物品項的照片，格式為 data URI，必須包含 MIME 類型並使用 Base64 編碼。預期格式：'data:<mimetype>;base64,<encoded_data>'。"
     ),
 });
 export type EstimateCalorieCountInput = z.infer<typeof EstimateCalorieCountInputSchema>;
 
 const EstimateCalorieCountOutputSchema = z.object({
-  foodItem: z.string().describe('The identified food item in the image.'),
-  calorieEstimate: z.number().describe('The estimated calorie count of the food item.'),
-  confidence: z.number().describe('The confidence level of the calorie estimation (0-1).'),
+  foodItem: z.string().describe('影像中辨識出的食物品項。'),
+  calorieEstimate: z.number().describe('食物品項的估計卡路里數。'),
+  confidence: z.number().describe('卡路里估計的信賴度（0-1）。'),
 });
 export type EstimateCalorieCountOutput = z.infer<typeof EstimateCalorieCountOutputSchema>;
 
@@ -39,22 +39,22 @@ const prompt = ai.definePrompt({
       photoDataUri: z
         .string()
         .describe(
-          "A photo of a food item, as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
+          "食物品項的照片，格式為 data URI，必須包含 MIME 類型並使用 Base64 編碼。預期格式：'data:<mimetype>;base64,<encoded_data>'。"
         ),
     }),
   },
   output: {
     schema: z.object({
-      foodItem: z.string().describe('The identified food item in the image.'),
-      calorieEstimate: z.number().describe('The estimated calorie count of the food item.'),
-      confidence: z.number().describe('The confidence level of the calorie estimation (0-1).'),
+      foodItem: z.string().describe('影像中辨識出的食物品項。'),
+      calorieEstimate: z.number().describe('食物品項的估計卡路里數。'),
+      confidence: z.number().describe('卡路里估計的信賴度（0-1）。'),
     }),
   },
-  prompt: `You are a nutrition expert. You will identify the food item in the image and estimate its calorie count.
+  prompt: `你是營養專家。你將辨識影像中的食物品項並估計其卡路里數。
 
-  Analyze the following image and provide the food item, calorie estimate and confidence level.
+  分析以下影像，並提供食物品項、卡路里估計值和信賴度。
 
-  Image: {{media url=photoDataUri}}
+  影像： {{media url=photoDataUri}}
   `,
 });
 
