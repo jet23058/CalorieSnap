@@ -225,10 +225,10 @@ export default function CalorieLogger() {
               toast({ title: '成功', description: '已取得目前位置。' });
           },
           (geoError) => {
-              // Log specific error details only if it's not a permission denied error
-              if (geoError.code !== geoError.PERMISSION_DENIED) {
-                console.error(`取得地點時發生錯誤: ${geoError.message || 'No message'} (代碼: ${geoError.code || 'No code'})`, geoError);
-              }
+               // Log specific error details only if it's not a permission denied error
+               if (geoError.code !== geoError.PERMISSION_DENIED) {
+                 console.error(`取得地點時發生錯誤: ${geoError.message || 'No message'} (代碼: ${geoError.code || 'No code'})`, geoError);
+               }
 
               let description = "無法取得您的地點。";
               if (geoError.code === geoError.PERMISSION_DENIED) {
@@ -1513,7 +1513,10 @@ export default function CalorieLogger() {
             <TabsContent value="logging" className="pt-4">
                  <Card className="mb-6 shadow-md">
                     <CardHeader>
-                        <CardTitle className="flex items-center gap-2"><Camera size={24} /> 拍攝或上傳食物照片</CardTitle>
+                         <CardTitle className="flex items-center gap-2">
+                             {/* Changed text here */}
+                             <Camera size={24} /> 點擊選擇上傳影像或拍攝照片
+                         </CardTitle>
                         <CardDescription>使用您的相機拍攝食物照片，或從您的裝置上傳影像。</CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -1611,5 +1614,3 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
-
-    
