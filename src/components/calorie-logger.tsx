@@ -28,7 +28,8 @@ import {
   Info,
   Settings,
   Apple,
-  CalendarDays
+  CalendarDays,
+  Trash // Added for deleting water entries
 } from 'lucide-react';
 import {
   Tabs,
@@ -84,6 +85,13 @@ export interface CalorieLogEntry {
   cost: number | null;
   notes?: string; // Optional user notes
   confidence?: number; // AI confidence score (0-1)
+}
+
+// New interface for individual water log entries
+export interface WaterLogEntry {
+    id: string;
+    timestamp: string; // ISO string format
+    amount: number; // in ml
 }
 
 export interface UserProfile {
@@ -186,7 +194,8 @@ export default function CalorieLogger() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [calorieLog, setCalorieLog, logError] = useLocalStorage<CalorieLogEntry[]>('calorieLog', []);
   const [userProfile, setUserProfile, profileError] = useLocalStorage<UserProfile>('userProfile', defaultUserProfile);
-  const [waterLog, setWaterLog, waterLogError] = useLocalStorage<Record<string, number>>('waterLog', {}); // { 'YYYY-MM-DD': liters }
+  // Updated waterLog state to store individual entries per day
+  const [waterLog, setWaterLog, waterLogError] = useLocalStorage<Record<string, WaterLogEntry[]>>('waterLog', {}); // { 'YYYY-MM-DD': [WaterLogEntry, ...] }
   const [notificationSettings, setNotificationSettings, notificationSettingsError] = useLocalStorage<NotificationSettings>('notificationSettings', defaultNotificationSettings);
   const [showDetails, setShowDetails] = useState<Record<string, boolean>>({}); // State to manage details visibility for each log entry
   const [editingEntry, setEditingEntry] = useState<CalorieLogEntry | null>(null); // State for the entry being edited
@@ -201,6 +210,7 @@ export default function CalorieLogger() {
   const [aspect, setAspect] = useState<number | undefined>(undefined); // Aspect ratio for crop - undefined for free crop
   const [isClient, setIsClient] = useState(false); // State for client-side rendering check
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(startOfDay(new Date())); // State for calendar date selection
+  const [customWaterAmount, setCustomWaterAmount] = useState<string>(''); // State for custom water input
 
 
   const { toast } = useToast();
@@ -335,35 +345,6 @@ export default function CalorieLogger() {
          mediaWidth,
          mediaHeight,
        );
-
-      // Uncomment below if you want aspect ratio locking functionality back
-      // if (!aspect) { // If no aspect ratio (free crop), default to full image initially
-      //      return centerCrop(
-      //        {
-      //          unit: '%',
-      //          width: 100,
-      //          height: 100,
-      //          x: 0,
-      //          y: 0,
-      //        },
-      //        mediaWidth,
-      //        mediaHeight,
-      //      );
-      // }
-      // // If aspect ratio is defined, use makeAspectCrop
-      // return centerCrop(
-      //   makeAspectCrop(
-      //     {
-      //       unit: '%',
-      //       width: 90, // Default to 90% width crop when aspect is set
-      //     },
-      //     aspect,
-      //     mediaWidth,
-      //     mediaHeight,
-      //   ),
-      //   mediaWidth,
-      //   mediaHeight,
-      // );
   }
 
 
@@ -776,44 +757,97 @@ export default function CalorieLogger() {
   const defaultWaterTarget = 2000; // Default target if profile is incomplete or weight not set
 
 
-  // --- Water Tracking ---
+   // --- Water Tracking ---
 
-  const addWater = (amount: number) => { // amount in ml
-    const today = getCurrentDate();
-    try {
-       setWaterLog(prevLog => ({
-           ...prevLog,
-           [today]: Math.max(0, (prevLog[today] || 0) + amount), // Ensure water doesn't go below 0
-       }));
-       toast({ title: "已記錄飲水", description: `已新增 ${amount} 毫升。` });
-    } catch (storageError: any) {
-        if (storageError instanceof LocalStorageError) {
-            toast({ variant: 'destructive', title: '記錄錯誤', description: storageError.message });
-        } else {
-            toast({ variant: 'destructive', title: '記錄錯誤', description: '記錄飲水時發生未預期的錯誤。' });
-        }
-         console.error("記錄飲水時發生錯誤:", storageError);
-    }
-  };
+   const addWater = (amountToAdd: number) => { // amount in ml
+       if (!isClient || isNaN(amountToAdd) || amountToAdd <= 0) {
+           toast({ variant: 'destructive', title: "無效數量", description: "請輸入有效的正數水量。" });
+           return;
+       }
 
-  const resetWater = () => {
-      const today = getCurrentDate();
+       const today = getCurrentDate();
+       const newWaterEntry: WaterLogEntry = {
+           id: Date.now().toString(),
+           timestamp: new Date().toISOString(),
+           amount: amountToAdd,
+       };
+
+       try {
+           setWaterLog(prevLog => {
+               const todaysEntries = prevLog[today] || [];
+               // Basic check to prevent excessively large logs for a single day
+               if (todaysEntries.length >= 50) { // Example limit: 50 water entries per day
+                   throw new LocalStorageError('今日飲水記錄已滿。');
+               }
+               return {
+                   ...prevLog,
+                   [today]: [...todaysEntries, newWaterEntry],
+               };
+           });
+           toast({ title: "已記錄飲水", description: `已新增 ${amountToAdd} 毫升。` });
+           setCustomWaterAmount(''); // Clear custom input after logging
+       } catch (storageError: any) {
+           if (storageError instanceof LocalStorageError) {
+               toast({ variant: 'destructive', title: '記錄錯誤', description: storageError.message });
+           } else {
+               toast({ variant: 'destructive', title: '記錄錯誤', description: '記錄飲水時發生未預期的錯誤。' });
+           }
+           console.error("記錄飲水時發生錯誤:", storageError);
+       }
+   };
+
+  const deleteWaterEntry = (id: string) => {
+      if (!isClient || !selectedDate) return;
+      const dateKey = format(selectedDate, 'yyyy-MM-dd');
+
       try {
-         setWaterLog(prevLog => ({ ...prevLog, [today]: 0 }));
-         toast({ title: "已重設", description: "今日飲水量已重設為 0。" });
+          setWaterLog(prevLog => {
+              const todaysEntries = prevLog[dateKey] || [];
+              const updatedEntries = todaysEntries.filter(entry => entry.id !== id);
+              return {
+                  ...prevLog,
+                  [dateKey]: updatedEntries,
+              };
+          });
+          toast({ title: "刪除成功", description: "飲水記錄已刪除。" });
       } catch (storageError: any) {
           if (storageError instanceof LocalStorageError) {
-            toast({ variant: 'destructive', title: '重設錯誤', description: storageError.message });
-         } else {
-            toast({ variant: 'destructive', title: '重設錯誤', description: '重設飲水時發生未預期的錯誤。' });
-         }
-         console.error("重設飲水時發生錯誤:", storageError);
+              toast({ variant: 'destructive', title: '刪除錯誤', description: storageError.message });
+          } else {
+              toast({ variant: 'destructive', title: '刪除錯誤', description: '刪除飲水記錄時發生未預期的錯誤。' });
+          }
+          console.error("刪除飲水記錄時發生錯誤:", storageError);
       }
   };
 
-  const todayWaterIntake = isClient ? (waterLog[getCurrentDate()] || 0) : 0; // Guard access
-  const currentRecommendedWater = recommendedWater ?? defaultWaterTarget; // Use default if null
-  const waterProgress = currentRecommendedWater ? Math.min((todayWaterIntake / currentRecommendedWater) * 100, 100) : 0;
+
+  const resetTodaysWater = () => {
+      if (!isClient) return;
+      const today = getCurrentDate();
+      try {
+          setWaterLog(prevLog => ({ ...prevLog, [today]: [] })); // Reset to empty array
+          toast({ title: "已重設", description: "今日飲水量已重設。" });
+      } catch (storageError: any) {
+          if (storageError instanceof LocalStorageError) {
+              toast({ variant: 'destructive', title: '重設錯誤', description: storageError.message });
+          } else {
+              toast({ variant: 'destructive', title: '重設錯誤', description: '重設飲水時發生未預期的錯誤。' });
+          }
+          console.error("重設飲水時發生錯誤:", storageError);
+      }
+  };
+
+
+   // Calculate total water intake for the selected date
+   const selectedDateWaterIntake = useMemo(() => {
+       if (!isClient || !selectedDate) return 0;
+       const dateKey = format(selectedDate, 'yyyy-MM-dd');
+       const entries = waterLog[dateKey] || [];
+       return entries.reduce((total, entry) => total + entry.amount, 0);
+   }, [waterLog, selectedDate, isClient]);
+
+   const currentRecommendedWater = recommendedWater ?? defaultWaterTarget; // Use default if null
+   const waterProgress = currentRecommendedWater ? Math.min((selectedDateWaterIntake / currentRecommendedWater) * 100, 100) : 0;
 
 
   // --- Rendering ---
@@ -1130,63 +1164,116 @@ export default function CalorieLogger() {
 
 
 
- const renderWaterTracker = () => (
-    <Card className="mt-6 shadow-md">
-        <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-                <Droplet size={24} className="text-blue-500" /> 每日飲水追蹤
-            </CardTitle>
-             <CardDescription>
-                  {recommendedWater !== null
-                      ? `個人建議飲水量：${recommendedWater} 毫升 (約 ${Math.ceil(recommendedWater / 250)} 杯)`
-                      : `建議飲水量：${defaultWaterTarget} 毫升 (約 ${Math.ceil(defaultWaterTarget / 250)} 杯 - 請完成個人資料以取得個人化建議)`
-                  }
-                  {userProfile.weight && <span className="text-xs"> (基於 {userProfile.weight} 公斤體重)</span>}
-             </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-            <Progress value={waterProgress} aria-label={`今日飲水進度 ${Math.round(waterProgress)}%`} className="h-3" />
-            <div className="text-center font-medium text-muted-foreground">
-                今日已喝： {todayWaterIntake} / {currentRecommendedWater} 毫升 ({Math.round(waterProgress)}%)
-            </div>
-            <div className="flex justify-center gap-2 flex-wrap">
-                <Button onClick={() => addWater(250)} variant="outline" size="sm" disabled={!isClient}>
-                    <Plus className="mr-1 h-4 w-4" /> 250ml (一杯)
-                </Button>
-                <Button onClick={() => addWater(500)} variant="outline" size="sm" disabled={!isClient}>
-                    <Plus className="mr-1 h-4 w-4" /> 500ml (一瓶)
-                </Button>
-                 <Button onClick={() => addWater(-250)} variant="outline" size="sm" disabled={!isClient || todayWaterIntake <= 0}>
-                     <Trash2 className="mr-1 h-4 w-4" /> 移除 250ml
-                 </Button>
-                 <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                         <Button variant="destructive" size="sm" disabled={!isClient}>
-                           <RotateCw className="mr-1 h-4 w-4" /> 重設今日
-                         </Button>
-                     </AlertDialogTrigger>
-                     <AlertDialogContent>
-                        <AlertDialogHeader>
-                            <AlertDialogTitle>確定要重設今日飲水量嗎？</AlertDialogTitle>
-                            <AlertDialogDescription>
-                                這將把今日的飲水量設回 0 毫升。此操作無法復原。
-                            </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                            <AlertDialogCancel>取消</AlertDialogCancel>
-                            <AlertDialogAction onClick={resetWater}>
-                                確認重設
-                            </AlertDialogAction>
-                        </AlertDialogFooter>
-                     </AlertDialogContent>
-                 </AlertDialog>
-            </div>
-        </CardContent>
-        <CardFooter className="text-xs text-muted-foreground">
-            保持水分充足對健康至關重要！成人每日建議飲水 8 杯 (約 2000 毫升)。
-        </CardFooter>
-    </Card>
-);
+ const renderWaterTracker = () => {
+      // Get water entries for the selected date
+     const selectedDateEntries = useMemo(() => {
+         if (!isClient || !selectedDate) return [];
+         const dateKey = format(selectedDate, 'yyyy-MM-dd');
+         return waterLog[dateKey] || [];
+     }, [waterLog, selectedDate, isClient]);
+
+     return (
+        <Card className="mt-6 shadow-md">
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                    <Droplet size={24} className="text-blue-500" /> 每日飲水追蹤 {selectedDate && `(${format(selectedDate, 'MM/dd')})`}
+                </CardTitle>
+                 <CardDescription>
+                      {recommendedWater !== null
+                          ? `個人建議飲水量：${recommendedWater} 毫升 (約 ${Math.ceil(recommendedWater / 250)} 杯)`
+                          : `建議飲水量：${defaultWaterTarget} 毫升 (約 ${Math.ceil(defaultWaterTarget / 250)} 杯 - 請完成個人資料以取得個人化建議)`
+                      }
+                      {userProfile.weight && <span className="text-xs"> (基於 {userProfile.weight} 公斤體重)</span>}
+                 </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {/* Progress and Total */}
+                 <div className="space-y-2">
+                    <Progress value={waterProgress} aria-label={`今日飲水進度 ${Math.round(waterProgress)}%`} className="h-3" />
+                    <div className="text-center font-medium text-muted-foreground">
+                        今日已喝： {selectedDateWaterIntake} / {currentRecommendedWater} 毫升 ({Math.round(waterProgress)}%)
+                    </div>
+                 </div>
+
+                 {/* Add Water Section */}
+                 <div className="flex flex-col sm:flex-row gap-2">
+                     <Input
+                         type="number"
+                         placeholder="輸入水量 (毫升)"
+                         value={customWaterAmount}
+                         onChange={(e) => setCustomWaterAmount(e.target.value)}
+                         min="1"
+                         className="flex-grow"
+                         disabled={!isClient}
+                     />
+                     <Button
+                         onClick={() => addWater(parseInt(customWaterAmount, 10))}
+                         disabled={!isClient || !customWaterAmount || parseInt(customWaterAmount, 10) <= 0}
+                         className="w-full sm:w-auto"
+                     >
+                         <Plus className="mr-1 h-4 w-4" /> 新增飲水
+                     </Button>
+                 </div>
+
+                 {/* Quick Add Buttons */}
+                 <div className="flex justify-center gap-2 flex-wrap">
+                    <Button onClick={() => addWater(250)} variant="outline" size="sm" disabled={!isClient}>
+                        <Plus className="mr-1 h-4 w-4" /> 250ml (一杯)
+                    </Button>
+                    <Button onClick={() => addWater(500)} variant="outline" size="sm" disabled={!isClient}>
+                        <Plus className="mr-1 h-4 w-4" /> 500ml (一瓶)
+                    </Button>
+                 </div>
+
+                 {/* List of Today's Entries */}
+                 {selectedDateEntries.length > 0 && (
+                     <div className="space-y-2 pt-4 border-t">
+                        <h4 className="text-sm font-medium text-muted-foreground">今日飲水記錄：</h4>
+                         <ul className="max-h-40 overflow-y-auto space-y-1 pr-2">
+                             {selectedDateEntries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map(entry => ( // Sort by time descending
+                                 <li key={entry.id} className="flex items-center justify-between text-sm bg-muted/50 p-2 rounded">
+                                      <span>{format(new Date(entry.timestamp), 'HH:mm')} - {entry.amount} 毫升</span>
+                                       <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => deleteWaterEntry(entry.id)} aria-label="刪除此飲水記錄" disabled={!isClient}>
+                                           <Trash size={14} />
+                                       </Button>
+                                 </li>
+                             ))}
+                         </ul>
+                     </div>
+                 )}
+
+                 {/* Reset Button */}
+                 <div className="pt-4 border-t">
+                     <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                             <Button variant="destructive" size="sm" disabled={!isClient || selectedDateEntries.length === 0}>
+                               <RotateCw className="mr-1 h-4 w-4" /> 重設今日
+                             </Button>
+                         </AlertDialogTrigger>
+                         <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>確定要重設今日飲水量嗎？</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    這將刪除今日所有的飲水記錄。此操作無法復原。
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>取消</AlertDialogCancel>
+                                <AlertDialogAction onClick={resetTodaysWater}>
+                                    確認重設
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                         </AlertDialogContent>
+                     </AlertDialog>
+                </div>
+
+            </CardContent>
+            <CardFooter className="text-xs text-muted-foreground">
+                保持水分充足對健康至關重要！成人每日建議飲水 8 杯 (約 2000 毫升)。
+            </CardFooter>
+        </Card>
+    );
+ };
 
  const renderProfileStats = () => (
     <Card className="mt-6 shadow-md">
