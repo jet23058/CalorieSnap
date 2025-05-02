@@ -1,7 +1,7 @@
-
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
+import { isValidDate } from '@/lib/utils'; // Import the utility function
 
 // Custom hook error class
 class LocalStorageError extends Error {
@@ -23,7 +23,10 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
         return initialValue;
       }
       try {
-          return JSON.parse(item);
+          const parsedItem = JSON.parse(item);
+          // Optional: Add specific checks if needed, e.g., for date validity if T includes dates
+          // Example: if (typeof parsedItem.timestamp === 'string' && !isValidDate(new Date(parsedItem.timestamp))) { ... }
+          return parsedItem;
       } catch (parseError) {
           console.error(`Error parsing localStorage key “${key}” with value "${item}":`, parseError);
           // If parsing fails, reset to initial value or handle differently
@@ -79,5 +82,3 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
 
 export default useLocalStorage;
 export { LocalStorageError }; // Export the custom error class if needed elsewhere
-
-    

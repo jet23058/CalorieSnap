@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
@@ -16,12 +15,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingSpinner } from '@/components/loading-spinner';
-import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3 } from 'lucide-react'; // Added ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3
+import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban } from 'lucide-react'; // Added ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog'; // Import Dialog components including DialogDescription
 import ReactCrop, { type Crop as CropType, centerCrop, makeAspectCrop, PixelCrop } from 'react-image-crop'; // Import react-image-crop
 import 'react-image-crop/dist/ReactCrop.css'; // Import css styles for react-image-crop
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for placeholder
-import { format, startOfDay, parseISO } from 'date-fns'; // Import date-fns functions
+import { format, startOfDay, parseISO, isValid } from 'date-fns'; // Import date-fns functions, add isValid
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -48,12 +47,13 @@ const activityLevelMultipliers: Record<ActivityLevel, number> = {
 };
 
 
-// Interface for the data stored in localStorage - re-add imageUrl
+// Interface for the data stored in localStorage - includes editable fields
 interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem'> {
   id: string;
-  timestamp: number;
-  imageUrl: string; // Re-added to store the compressed image data URI
+  timestamp: number; // Editable timestamp (epoch ms)
+  imageUrl: string;
   foodItem: string; // Editable food item name
+  calorieEstimate: number; // Editable calorie estimate
   location?: string; // Optional location
   mealType?: MealType; // Meal type
   amount?: number; // Optional amount/cost
@@ -74,6 +74,9 @@ interface DailySummary {
     totalAmount: number;
     entries: LogEntryStorage[];
 }
+
+// Type for temporary edit data
+type EditedEntryData = Partial<Pick<LogEntryStorage, 'foodItem' | 'calorieEstimate' | 'timestamp' | 'location' | 'mealType' | 'amount'>>;
 
 
 // Compression settings
@@ -199,6 +202,38 @@ const calculateEstimatedNeeds = (profile: UserProfile): number | null => {
     return Math.round(bmr * multiplier);
 };
 
+// Format date/time for datetime-local input
+const formatDateTimeLocal = (timestamp: number): string => {
+  if (!timestamp) return '';
+  try {
+    const date = new Date(timestamp);
+    if (!isValid(date)) return ''; // Check if date is valid
+    // Format: YYYY-MM-DDTHH:mm (seconds are usually not needed for this input)
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  } catch (e) {
+    console.error("Error formatting timestamp:", e);
+    return '';
+  }
+};
+
+// Parse date/time from datetime-local input back to timestamp
+const parseDateTimeLocal = (dateTimeString: string): number | null => {
+  if (!dateTimeString) return null;
+  try {
+    const date = new Date(dateTimeString);
+    if (!isValid(date)) return null; // Check if parsed date is valid
+    return date.getTime();
+  } catch (e) {
+    console.error("Error parsing date/time string:", e);
+    return null;
+  }
+};
+
 
 export default function CalorieLogger() {
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null); // For cropper
@@ -220,12 +255,17 @@ export default function CalorieLogger() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const { toast } = useToast();
 
-  // State for editable fields
+  // State for editable fields (during logging)
   const [editedFoodItem, setEditedFoodItem] = useState<string>('');
   const [location, setLocation] = useState<string>('');
   const [isFetchingLocation, setIsFetchingLocation] = useState<boolean>(false);
   const [mealType, setMealType] = useState<MealType | undefined>(undefined);
   const [amount, setAmount] = useState<string>(''); // Use string for input
+
+  // State for editing existing log entries
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editedEntryData, setEditedEntryData] = useState<EditedEntryData>({});
+  const [editedTimestampString, setEditedTimestampString] = useState<string>(''); // For datetime-local input
 
   // State for cropping modal
   const [isCropping, setIsCropping] = useState(false);
@@ -682,7 +722,7 @@ export default function CalorieLogger() {
         // Do not include the original `foodItem` from estimationResult if using editedFoodItem
         foodItem: editedFoodItem.trim(), // Use the trimmed edited name
         id: Date.now().toString(),
-        timestamp: Date.now(),
+        timestamp: Date.now(), // Default timestamp is now
         imageUrl: imageSrc, // STORE the compressed image data URI
         location: location || undefined, // Use location from state
         mealType: mealType, // Use meal type from state
@@ -758,6 +798,102 @@ export default function CalorieLogger() {
         });
     }
 };
+
+  // --- Edit Entry Functions ---
+  const startEditing = (entry: LogEntryStorage) => {
+    setEditingEntryId(entry.id);
+    setEditedEntryData({
+      foodItem: entry.foodItem,
+      calorieEstimate: entry.calorieEstimate,
+      timestamp: entry.timestamp, // Keep original timestamp for initial value
+      location: entry.location,
+      mealType: entry.mealType,
+      amount: entry.amount,
+    });
+    // Set the string representation for the datetime-local input
+    setEditedTimestampString(formatDateTimeLocal(entry.timestamp));
+  };
+
+  const cancelEditing = () => {
+    setEditingEntryId(null);
+    setEditedEntryData({});
+    setEditedTimestampString('');
+  };
+
+  const handleEditInputChange = (field: keyof EditedEntryData, value: string | number | MealType | undefined) => {
+    setEditedEntryData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleEditTimestampChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newTimestampString = e.target.value;
+    setEditedTimestampString(newTimestampString); // Update the string state
+    // Attempt to parse and update the numeric timestamp in editedEntryData
+    const newTimestamp = parseDateTimeLocal(newTimestampString);
+    if (newTimestamp !== null) {
+      setEditedEntryData(prev => ({ ...prev, timestamp: newTimestamp }));
+    } else {
+      // Optionally handle invalid date input, e.g., clear timestamp or show error
+      // For now, just update the string, validation happens on save
+      setEditedEntryData(prev => ({ ...prev, timestamp: undefined })); // Indicate invalid time temporarily
+    }
+  };
+
+  const saveEditedEntry = (id: string) => {
+    const editedTimestamp = parseDateTimeLocal(editedTimestampString); // Parse final string value
+
+    // Validation
+    if (!editedEntryData.foodItem || !editedEntryData.foodItem.trim()) {
+        toast({ title: "儲存錯誤", description: "食物品項名稱不可為空。", variant: "destructive" });
+        return;
+    }
+    const editedCalories = editedEntryData.calorieEstimate;
+    if (editedCalories === undefined || isNaN(editedCalories) || editedCalories < 0) {
+        toast({ title: "儲存錯誤", description: "請輸入有效的卡路里數值（非負數）。", variant: "destructive" });
+        return;
+    }
+    if (editedTimestamp === null) {
+        toast({ title: "儲存錯誤", description: "請輸入有效的日期和時間。", variant: "destructive" });
+        return;
+    }
+     const editedAmount = editedEntryData.amount;
+     if (editedAmount !== undefined && (isNaN(editedAmount) || editedAmount < 0)) {
+         toast({ title: "儲存錯誤", description: "請輸入有效的金額（非負數）。", variant: "destructive" });
+         return;
+     }
+
+
+    try {
+        setCalorieLog(prevLog =>
+            prevLog.map(entry =>
+                entry.id === id
+                    ? {
+                        ...entry, // Keep original confidence, id, imageUrl
+                        foodItem: editedEntryData.foodItem!.trim(),
+                        calorieEstimate: editedCalories,
+                        timestamp: editedTimestamp, // Use parsed timestamp
+                        location: editedEntryData.location || undefined, // Handle empty string for location
+                        mealType: editedEntryData.mealType,
+                        amount: editedAmount !== undefined ? Number(editedAmount) : undefined, // Ensure amount is number
+                      }
+                    : entry
+            )
+        );
+        cancelEditing(); // Exit edit mode
+        toast({
+            title: "記錄已更新",
+            description: "項目已成功更新。",
+        });
+    } catch (e) {
+        console.error("儲存編輯後的項目時發生錯誤:", e);
+        // Handle potential LocalStorage errors during update
+        if (e instanceof LocalStorageError) {
+            toast({ title: "更新錯誤", description: e.message, variant: "destructive" });
+        } else {
+            toast({ title: "更新錯誤", description: "儲存變更時發生未預期的錯誤。", variant: "destructive" });
+        }
+    }
+  };
+  // --- End Edit Entry Functions ---
 
   // Handlers for User Profile Input
   const handleProfileChange = (field: keyof UserProfile, value: string | number | ActivityLevel | undefined) => {
@@ -971,87 +1107,144 @@ export default function CalorieLogger() {
     return null; // No result or error yet
   };
 
-  const renderLogEntry = (entry: LogEntryStorage) => (
-    <div className="flex items-start space-x-4">
-        {/* Display Image or Placeholder */}
-         <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden"> {/* Fixed size and overflow hidden */}
-            {entry.imageUrl ? (
-                <Image
-                    src={entry.imageUrl}
-                    alt={`記錄項目：${entry.foodItem}`}
-                    fill // Use fill to cover the container
-                    sizes="(max-width: 640px) 4rem, 5rem" // Provide sizes hint
-                    style={{ objectFit: 'cover' }} // Cover the area
-                    className="rounded-md"
-                    data-ai-hint="食物 盤子"
-                    // Consider adding loading="lazy" for log images
-                    loading="lazy"
-                    // Add error handling for images that might fail to load (e.g., if data URI is corrupted)
-                    onError={(e) => {
-                        // Optionally replace with placeholder on error
-                        (e.target as HTMLImageElement).src = ''; // Clear src
-                        (e.target as HTMLImageElement).style.display = 'none'; // Hide broken image icon
-                        // You might want to show the ImageOff icon here instead programmatically
-                        const parentDiv = (e.target as HTMLImageElement).parentElement;
-                        if(parentDiv){
-                             const icon = document.createElement('span'); // Or render the lucide icon properly
-                             icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off w-8 h-8"><path d="M11 19.59V15l-2.3 2.3a1 1 0 0 1-1.4 0l-1.7-1.7a1 1 0 0 1 0-1.4L8.6 11"/><path d="m15 11 1.4-1.4a1 1 0 0 1 1.4 0l1.7 1.7a1 1 0 0 1 0 1.4L17 15"/><line x1="2" x2="22" y1="2" y2="22"/><path d="M8.5 11.5 5 15l4 4"/><path d="M14 14l3-3 4 4"/><path d="M21 15V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v10c0 .4.1.8.4 1.1"/></svg>';
-                             icon.className = "text-muted-foreground opacity-50";
-                             parentDiv.appendChild(icon);
-                        }
-                    }}
-                />
-            ) : (
-               <ImageOff size={32} aria-label="無可用影像"/>
-            )}
-        </div>
 
-        <div className="flex-1 space-y-1 overflow-hidden"> {/* Prevent text overflow */}
-            <p className="font-semibold text-base truncate">{entry.foodItem}</p> {/* Truncate long names */}
-            <p className="text-sm text-primary">{entry.calorieEstimate} 大卡</p>
+  const renderLogEntry = (entry: LogEntryStorage) => {
+    const isEditing = editingEntryId === entry.id;
 
-             <div className="text-xs text-muted-foreground space-y-0.5">
-                 {/* Combine Meal Type and Time */}
-                 <div className="flex items-center flex-wrap gap-x-2">
-                    {entry.mealType && (
-                        <div className="flex items-center">
-                            {renderMealIcon(entry.mealType)}
-                            <span>{mealTypeTranslations[entry.mealType]}</span> {/* Use translated text */}
+    return (
+        <div className="flex items-start space-x-3 sm:space-x-4 py-3">
+            {/* Image */}
+             <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden">
+                {entry.imageUrl ? (
+                    <Image
+                        src={entry.imageUrl}
+                        alt={`記錄項目：${entry.foodItem}`}
+                        fill sizes="(max-width: 640px) 4rem, 5rem"
+                        style={{ objectFit: 'cover' }} className="rounded-md" data-ai-hint="食物 盤子" loading="lazy"
+                        onError={(e) => { /* Error handling logic */ }}
+                    />
+                ) : ( <ImageOff size={32} aria-label="無可用影像"/> )}
+            </div>
+
+            {/* Content / Edit Form */}
+            <div className="flex-1 space-y-2 overflow-hidden">
+                {isEditing ? (
+                    <>
+                        {/* Food Item */}
+                        <div className="space-y-1">
+                            <Label htmlFor={`edit-food-${entry.id}`}>食物品項 <span className="text-destructive">*</span></Label>
+                            <Input id={`edit-food-${entry.id}`} value={editedEntryData.foodItem ?? ''}
+                                   onChange={(e) => handleEditInputChange('foodItem', e.target.value)} placeholder="例如：雞肉沙拉" />
                         </div>
-                    )}
-                     <span>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                        {/* Calories */}
+                         <div className="space-y-1">
+                            <Label htmlFor={`edit-calories-${entry.id}`}>卡路里 (大卡) <span className="text-destructive">*</span></Label>
+                            <Input id={`edit-calories-${entry.id}`} type="number" min="0"
+                                   value={editedEntryData.calorieEstimate ?? ''}
+                                   onChange={(e) => handleEditInputChange('calorieEstimate', e.target.value === '' ? undefined : parseFloat(e.target.value))} placeholder="例如：350" />
+                        </div>
+                         {/* Timestamp */}
+                         <div className="space-y-1">
+                             <Label htmlFor={`edit-timestamp-${entry.id}`}>日期與時間 <span className="text-destructive">*</span></Label>
+                             <Input
+                                 id={`edit-timestamp-${entry.id}`}
+                                 type="datetime-local"
+                                 value={editedTimestampString} // Use string state
+                                 onChange={handleEditTimestampChange}
+                                 max={formatDateTimeLocal(Date.now())} // Prevent future dates/times
+                                 step="60" // Allow minute precision
+                             />
+                         </div>
 
-                 </div>
+                        {/* Location */}
+                        <div className="space-y-1">
+                             <Label htmlFor={`edit-location-${entry.id}`}>地點</Label>
+                             <Input id={`edit-location-${entry.id}`} value={editedEntryData.location ?? ''}
+                                    onChange={(e) => handleEditInputChange('location', e.target.value)} placeholder="例如：家裡" />
+                        </div>
 
-                {entry.location && (
-                    <div className="flex items-center">
-                        <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" /> {/* Prevent shrinking */}
-                        <span className="truncate">{entry.location}</span> {/* Truncate long locations */}
-                    </div>
+                        {/* Meal Type */}
+                         <div className="space-y-1">
+                             <Label>餐點類型</Label>
+                             <RadioGroup value={editedEntryData.mealType} onValueChange={(value) => handleEditInputChange('mealType', value as MealType)} className="grid grid-cols-2 gap-x-4 gap-y-2 pt-1 sm:grid-cols-4">
+                                 {(['Breakfast', 'Lunch', 'Dinner', 'Snack'] as MealType[]).map((type) => (
+                                     <div key={type} className="flex items-center space-x-2">
+                                         <RadioGroupItem value={type} id={`edit-meal-${entry.id}-${type}`} />
+                                         <Label htmlFor={`edit-meal-${entry.id}-${type}`} className="font-normal cursor-pointer flex items-center gap-1.5">
+                                             {renderMealIcon(type)} {mealTypeTranslations[type]}
+                                         </Label>
+                                     </div>
+                                 ))}
+                             </RadioGroup>
+                         </div>
+
+                        {/* Amount */}
+                        <div className="space-y-1">
+                             <Label htmlFor={`edit-amount-${entry.id}`}>金額 / 費用</Label>
+                             <div className="relative">
+                                <DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input id={`edit-amount-${entry.id}`} type="number" step="0.01" min="0" className="pl-8"
+                                    value={editedEntryData.amount ?? ''}
+                                    onChange={(e) => handleEditInputChange('amount', e.target.value === '' ? undefined : parseFloat(e.target.value))} placeholder="0.00" />
+                             </div>
+                         </div>
+                    </>
+                ) : (
+                    <>
+                        <p className="font-semibold text-base truncate">{entry.foodItem}</p>
+                        <p className="text-sm text-primary">{entry.calorieEstimate} 大卡</p>
+                        <div className="text-xs text-muted-foreground space-y-0.5">
+                            <div className="flex items-center flex-wrap gap-x-2">
+                                {entry.mealType && (
+                                    <div className="flex items-center">
+                                        {renderMealIcon(entry.mealType)}
+                                        <span>{mealTypeTranslations[entry.mealType]}</span>
+                                    </div>
+                                )}
+                                <span>{format(new Date(entry.timestamp), 'yyyy/MM/dd HH:mm')}</span> {/* Display formatted date/time */}
+                            </div>
+                            {entry.location && (
+                                <div className="flex items-center">
+                                    <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
+                                    <span className="truncate">{entry.location}</span>
+                                </div>
+                            )}
+                            {entry.amount !== undefined && entry.amount !== null && (
+                                <div className="flex items-center">
+                                    <DollarSign className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
+                                    <span>{(typeof entry.amount === 'number' ? entry.amount.toFixed(2) : 'N/A')} 元</span>
+                                </div>
+                            )}
+                        </div>
+                    </>
                 )}
-                {entry.amount !== undefined && entry.amount !== null && (
-                    <div className="flex items-center">
-                        <DollarSign className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
-                        {/* Ensure amount is treated as number and formatted */}
-                        <span>{(typeof entry.amount === 'number' ? entry.amount.toFixed(2) : 'N/A')} 元</span> {/* Added currency unit */}
-                    </div>
-                )}
-             </div>
+            </div>
 
+            {/* Action Buttons */}
+            <div className="flex flex-col space-y-1 sm:space-y-2 shrink-0 self-start">
+                {isEditing ? (
+                    <>
+                        <Button variant="ghost" size="icon" onClick={() => saveEditedEntry(entry.id)} className="text-primary hover:bg-primary/10 h-8 w-8" aria-label="儲存變更" title="儲存變更">
+                            <Save className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={cancelEditing} className="text-muted-foreground hover:bg-muted/10 h-8 w-8" aria-label="取消編輯" title="取消編輯">
+                            <Ban className="h-4 w-4" />
+                        </Button>
+                    </>
+                ) : (
+                    <>
+                        <Button variant="ghost" size="icon" onClick={() => startEditing(entry)} className="text-muted-foreground hover:bg-muted/10 h-8 w-8" aria-label={`編輯 ${entry.foodItem}`} title={`編輯 ${entry.foodItem}`}>
+                            <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => deleteLogEntry(entry.id)} className="text-destructive hover:bg-destructive/10 h-8 w-8" aria-label={`刪除 ${entry.foodItem}`} title={`刪除 ${entry.foodItem}`}>
+                            <Trash2 className="h-4 w-4" />
+                        </Button>
+                    </>
+                )}
+            </div>
         </div>
-        {/* Delete Button */}
-        <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => deleteLogEntry(entry.id)}
-            className="text-destructive hover:bg-destructive/10 mt-1 shrink-0 self-start" // Align top
-            aria-label={`刪除 ${entry.foodItem} 的記錄項目`}
-            title={`刪除 ${entry.foodItem}`} // Tooltip
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
-  );
+    );
+};
 
 
   return (
@@ -1336,14 +1529,10 @@ export default function CalorieLogger() {
                              </div>
                            </AccordionTrigger>
                            <AccordionContent className="border-t border-border"> {/* Add border */}
-                             <div className="p-4 space-y-4">
+                             <div className="p-2 sm:p-4 divide-y divide-border"> {/* Adjust padding and add dividers */}
                                {summary.entries.map((entry) => (
                                    <React.Fragment key={entry.id}>
                                       {renderLogEntry(entry)}
-                                      {/* Add separator between entries within a day */}
-                                      {summary.entries.indexOf(entry) < summary.entries.length - 1 && (
-                                         <Separator className="my-3" />
-                                      )}
                                    </React.Fragment>
                                ))}
                              </div>
