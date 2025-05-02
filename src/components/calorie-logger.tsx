@@ -48,7 +48,7 @@ const activityLevelMultipliers: Record<ActivityLevel, number> = {
 
 
 // Interface for the data stored in localStorage - includes editable fields
-interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem'> {
+interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem' | 'calorieEstimate'> {
   id: string;
   timestamp: number; // Editable timestamp (epoch ms)
   imageUrl: string;
@@ -84,26 +84,26 @@ const IMAGE_MAX_WIDTH = 1024; // Max width for the compressed image
 const IMAGE_QUALITY = 0.8; // JPEG quality (0 to 1)
 const CROP_ASPECT = 16 / 9; // Aspect ratio for the crop tool
 
-// Helper function for centering the crop
-function centerAspectCrop(
-  mediaWidth: number,
-  mediaHeight: number,
-  aspect: number,
-): CropType {
-  return centerCrop(
-    makeAspectCrop(
-      {
-        unit: '%',
-        width: 90, // Start with 90% width crop
-      },
-      aspect,
-      mediaWidth,
-      mediaHeight,
-    ),
-    mediaWidth,
-    mediaHeight,
-  );
-}
+// Helper function for centering the crop - NOT USED FOR INITIAL CROP ANYMORE
+// function centerAspectCrop(
+//   mediaWidth: number,
+//   mediaHeight: number,
+//   aspect: number,
+// ): CropType {
+//   return centerCrop(
+//     makeAspectCrop(
+//       {
+//         unit: '%',
+//         width: 90, // Start with 90% width crop
+//       },
+//       aspect,
+//       mediaWidth,
+//       mediaHeight,
+//     ),
+//     mediaWidth,
+//     mediaHeight,
+//   );
+// }
 
 // Helper function to get cropped image data URL
 function getCroppedImg(
@@ -257,6 +257,7 @@ export default function CalorieLogger() {
 
   // State for editable fields (during logging)
   const [editedFoodItem, setEditedFoodItem] = useState<string>('');
+  const [editedCalorieEstimate, setEditedCalorieEstimate] = useState<string>(''); // Editable calories before logging, use string for input
   const [location, setLocation] = useState<string>('');
   const [isFetchingLocation, setIsFetchingLocation] = useState<boolean>(false);
   const [mealType, setMealType] = useState<MealType | undefined>(undefined);
@@ -269,7 +270,7 @@ export default function CalorieLogger() {
 
   // State for cropping modal
   const [isCropping, setIsCropping] = useState(false);
-  const [crop, setCrop] = useState<CropType>(); // Crop area state
+  const [crop, setCrop] = useState<CropType>(); // Crop area state (using % initially)
   const [completedCrop, setCompletedCrop] = useState<PixelCrop>(); // Completed crop state (in pixels)
 
   // State to track client-side mounting for hydration fix
@@ -423,19 +424,46 @@ export default function CalorieLogger() {
    // Called when image loads in the cropper
   function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
     const { width, height } = e.currentTarget;
-    // Set the initial crop area centered with the defined aspect ratio
-     if (width > 0 && height > 0) { // Ensure dimensions are valid
-      setCrop(centerAspectCrop(width, height, CROP_ASPECT));
+     if (width > 0 && height > 0) {
+      // Set the initial crop to 100% width and height
+      setCrop({
+          unit: '%',
+          width: 100,
+          height: 100,
+          x: 0,
+          y: 0
+      });
+      // Also trigger onComplete immediately with pixel values for 100% crop
+      setCompletedCrop({
+          unit: 'px',
+          width: width,
+          height: height,
+          x: 0,
+          y: 0
+      });
+
      } else {
          console.warn("Image dimensions are zero on load, cannot set initial crop.");
          // Optionally, set a default crop or wait for valid dimensions
-         setCrop({ unit: '%', width: 50, height: 50, x: 25, y: 25 }); // Example fallback
+         // Setting a percentage crop might still be useful as a fallback
+         setCrop({ unit: '%', width: 100, height: 100, x: 0, y: 0 });
      }
   }
 
    // Handle the crop confirmation
   const handleCropConfirm = async () => {
+    // Check if completedCrop and image ref exist
     if (completedCrop?.width && completedCrop?.height && imgRef.current && originalImageSrc) {
+      // Add check: Ensure crop dimensions are not zero
+      if (completedCrop.width === 0 || completedCrop.height === 0) {
+          toast({
+              title: "裁切錯誤",
+              description: "裁切區域的寬度或高度不能為零。",
+              variant: "destructive",
+          });
+          return; // Prevent proceeding with zero dimensions
+      }
+
       setIsLoading(true);
       setLoadingMessage('正在裁切並壓縮影像...');
       setIsCropping(false); // Close modal immediately
@@ -444,7 +472,7 @@ export default function CalorieLogger() {
         // Get the cropped image data URL (already compressed by getCroppedImg)
         const croppedDataUrl = await getCroppedImg(
           imgRef.current,
-          completedCrop
+          completedCrop // Pass the pixel crop state
         );
 
         setImageSrc(croppedDataUrl); // Set the final preview image AND the image to be stored
@@ -466,7 +494,7 @@ export default function CalorieLogger() {
     } else {
         toast({
             title: "裁切錯誤",
-            description: "請選取要裁切的區域。",
+            description: "請選取要裁切的區域，或等待影像載入完成。", // Updated message
             variant: "destructive",
         });
     }
@@ -637,6 +665,7 @@ export default function CalorieLogger() {
      setEstimationResult(null);
      setError(null);
      setEditedFoodItem('');
+     setEditedCalorieEstimate(''); // Clear editable calories as well
      setLocation('');
      setMealType(undefined);
      setAmount('');
@@ -683,6 +712,7 @@ export default function CalorieLogger() {
 
       setEstimationResult(result);
       setEditedFoodItem(result.foodItem); // Pre-fill editable name
+      setEditedCalorieEstimate(result.calorieEstimate.toString()); // Pre-fill editable calories as string
       fetchCurrentLocation(); // Attempt to fetch location after getting result
 
     } catch (err) {
@@ -711,15 +741,25 @@ export default function CalorieLogger() {
   }, [toast, fetchCurrentLocation]); // Added fetchCurrentLocation dependency
 
   const logCalories = () => {
+    // Validation for edited values before logging
+    if (!editedFoodItem || !editedFoodItem.trim()) {
+         toast({ title: "記錄錯誤", description: "食物品項名稱不可為空。", variant: "destructive" });
+         return;
+    }
+    const parsedCalories = parseInt(editedCalorieEstimate, 10); // Parse the editable calorie string
+    if (isNaN(parsedCalories) || parsedCalories < 0) {
+        toast({ title: "記錄錯誤", description: "請輸入有效的卡路里數值（非負整數）。", variant: "destructive" });
+        return;
+    }
+    const parsedAmount = parseFloat(amount); // Keep amount parsing as float
+
     // Check for imageSrc being present as it's now required for the log entry
-    if (estimationResult && editedFoodItem && editedFoodItem.trim() && imageSrc) {
-      const parsedAmount = parseFloat(amount);
+    if (estimationResult && imageSrc) { // Use estimationResult for confidence, but edited values for others
       // Create entry based on the storage interface (now includes imageUrl)
       const newLogEntry: LogEntryStorage = {
-        // Spread only the properties needed for storage
-        calorieEstimate: estimationResult.calorieEstimate,
+        // Use confidence from original estimation, but other values from edited state
         confidence: estimationResult.confidence,
-        // Do not include the original `foodItem` from estimationResult if using editedFoodItem
+        calorieEstimate: parsedCalories, // Use the parsed edited calorie value
         foodItem: editedFoodItem.trim(), // Use the trimmed edited name
         id: Date.now().toString(),
         timestamp: Date.now(), // Default timestamp is now
@@ -740,7 +780,7 @@ export default function CalorieLogger() {
           clearAll(); // Use the clearAll function
           toast({
               title: "記錄成功",
-              description: `${newLogEntry.foodItem} (${estimationResult.calorieEstimate} 大卡) 已新增至您的記錄中。`,
+              description: `${newLogEntry.foodItem} (${newLogEntry.calorieEstimate} 大卡) 已新增至您的記錄中。`,
           });
       } catch (e) {
            console.error("儲存至 localStorage 時發生錯誤:", e);
@@ -767,10 +807,8 @@ export default function CalorieLogger() {
       }
 
     } else {
-         let errorDesc = "沒有可記錄的估計結果。";
-         if (!editedFoodItem || !editedFoodItem.trim()) {
-             errorDesc = "食物品項名稱不可為空。";
-         } else if (!imageSrc) {
+         let errorDesc = "沒有可記錄的估計結果或影像。";
+         if (!imageSrc) {
              errorDesc = "缺少影像資料無法記錄。"; // Add check for missing image
          }
          toast({
@@ -821,8 +859,20 @@ export default function CalorieLogger() {
   };
 
   const handleEditInputChange = (field: keyof EditedEntryData, value: string | number | MealType | undefined) => {
-    setEditedEntryData(prev => ({ ...prev, [field]: value }));
+    // Special handling for calorieEstimate to keep it as number in the state
+    if (field === 'calorieEstimate') {
+        const numValue = value === '' ? undefined : parseInt(value as string, 10);
+         // Store undefined if parsing fails or NaN, otherwise store the number
+        setEditedEntryData(prev => ({ ...prev, [field]: (numValue !== undefined && !isNaN(numValue) && numValue >= 0) ? numValue : undefined }));
+    } else if (field === 'amount') {
+         const numValue = value === '' ? undefined : parseFloat(value as string);
+         setEditedEntryData(prev => ({ ...prev, [field]: (numValue !== undefined && !isNaN(numValue) && numValue >= 0) ? numValue : undefined }));
+    }
+    else {
+      setEditedEntryData(prev => ({ ...prev, [field]: value }));
+    }
   };
+
 
   const handleEditTimestampChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTimestampString = e.target.value;
@@ -869,11 +919,11 @@ export default function CalorieLogger() {
                     ? {
                         ...entry, // Keep original confidence, id, imageUrl
                         foodItem: editedEntryData.foodItem!.trim(),
-                        calorieEstimate: editedCalories,
+                        calorieEstimate: editedCalories, // Already validated number
                         timestamp: editedTimestamp, // Use parsed timestamp
                         location: editedEntryData.location || undefined, // Handle empty string for location
                         mealType: editedEntryData.mealType,
-                        amount: editedAmount !== undefined ? Number(editedAmount) : undefined, // Ensure amount is number
+                        amount: editedAmount, // Already validated number or undefined
                       }
                     : entry
             )
@@ -998,12 +1048,33 @@ export default function CalorieLogger() {
                 />
             </div>
 
-            {/* Read-only Calorie Estimate & Confidence */}
-             <div className="flex justify-between text-sm pt-2">
-                <p><strong className="font-medium">估計卡路里：</strong> {estimationResult.calorieEstimate} 大卡</p>
+            {/* Editable Calorie Estimate */}
+             <div className="space-y-1">
+                 <Label htmlFor="calorieEstimate">卡路里 (大卡) <span className="text-destructive">*</span></Label>
+                 <Input
+                     id="calorieEstimate"
+                     type="number"
+                     value={editedCalorieEstimate}
+                     onChange={(e) => {
+                         // Allow only non-negative integers
+                         const val = e.target.value;
+                         if (val === '' || /^\d+$/.test(val)) {
+                             setEditedCalorieEstimate(val);
+                         }
+                     }}
+                     placeholder="例如：350"
+                     min="0"
+                     step="1" // Allow only integers
+                     aria-required="true"
+                     inputMode="numeric" // Hint for mobile keyboards
+                 />
+             </div>
+
+            {/* Read-only Confidence */}
+             <div className="flex justify-end text-sm pt-1"> {/* Adjusted alignment */}
                  {/* Conditional rendering for confidence */}
-                <p className={estimationResult.confidence < 0.7 ? 'text-orange-600' : ''}>
-                    <strong className="font-medium">信賴度：</strong>
+                <p className={estimationResult.confidence < 0.7 ? 'text-orange-600' : 'text-muted-foreground'}> {/* Use muted-foreground for normal */}
+                    <strong className="font-medium">AI 估計信賴度：</strong>
                     {Math.round(estimationResult.confidence * 100)}%
                      {estimationResult.confidence < 0.5 && <span className="ml-1 text-xs">(低)</span>}
                 </p>
@@ -1093,7 +1164,11 @@ export default function CalorieLogger() {
           </CardContent>
           <CardFooter className="flex-col sm:flex-row gap-2 pt-4"> {/* Add padding top */}
              {/* Make Log button more prominent */}
-            <Button onClick={logCalories} className="bg-primary text-primary-foreground hover:bg-primary/90 w-full sm:w-auto flex-1 sm:flex-none" disabled={!editedFoodItem || !editedFoodItem.trim() || isLoading || !imageSrc}> {/* Disable if no image */}
+            <Button
+                onClick={logCalories}
+                className="bg-primary text-primary-foreground hover:bg-primary/90 w-full sm:w-auto flex-1 sm:flex-none"
+                disabled={!editedFoodItem || !editedFoodItem.trim() || editedCalorieEstimate === '' || isNaN(parseInt(editedCalorieEstimate)) || parseInt(editedCalorieEstimate) < 0 || isLoading || !imageSrc} // Disable if no image, invalid name or calories
+             >
               {isLoading ? <LoadingSpinner size={16} className="mr-2"/> : <PlusCircle className="mr-2 h-4 w-4" />}
                記錄卡路里
             </Button>
@@ -1139,9 +1214,9 @@ export default function CalorieLogger() {
                         {/* Calories */}
                          <div className="space-y-1">
                             <Label htmlFor={`edit-calories-${entry.id}`}>卡路里 (大卡) <span className="text-destructive">*</span></Label>
-                            <Input id={`edit-calories-${entry.id}`} type="number" min="0"
-                                   value={editedEntryData.calorieEstimate ?? ''}
-                                   onChange={(e) => handleEditInputChange('calorieEstimate', e.target.value === '' ? undefined : parseFloat(e.target.value))} placeholder="例如：350" />
+                            <Input id={`edit-calories-${entry.id}`} type="number" min="0" step="1" inputMode="numeric"
+                                   value={editedEntryData.calorieEstimate ?? ''} // Display number from state
+                                   onChange={(e) => handleEditInputChange('calorieEstimate', e.target.value)} placeholder="例如：350" />
                         </div>
                          {/* Timestamp */}
                          <div className="space-y-1">
@@ -1185,7 +1260,7 @@ export default function CalorieLogger() {
                                 <DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                 <Input id={`edit-amount-${entry.id}`} type="number" step="0.01" min="0" className="pl-8"
                                     value={editedEntryData.amount ?? ''}
-                                    onChange={(e) => handleEditInputChange('amount', e.target.value === '' ? undefined : parseFloat(e.target.value))} placeholder="0.00" />
+                                    onChange={(e) => handleEditInputChange('amount', e.target.value)} placeholder="0.00" />
                              </div>
                          </div>
                     </>
@@ -1285,7 +1360,7 @@ export default function CalorieLogger() {
                     <DialogHeader>
                       <DialogTitle>裁切影像</DialogTitle>
                       <DialogDescription>
-                        拖曳選框以裁切您的食物照片。
+                        拖曳選框以裁切您的食物照片。(預設為整張圖)
                       </DialogDescription>
                     </DialogHeader>
                     {originalImageSrc && (
@@ -1295,7 +1370,7 @@ export default function CalorieLogger() {
                                 crop={crop}
                                 onChange={(_, percentCrop) => setCrop(percentCrop)}
                                 onComplete={(c) => setCompletedCrop(c)}
-                                aspect={CROP_ASPECT}
+                                // aspect={CROP_ASPECT} // Remove aspect ratio constraint to allow freeform crop
                                 // minWidth={100} // Optional: minimum crop dimensions
                                 // minHeight={100}
                                 // ruleOfThirds // Optional: show rule of thirds grid
