@@ -1273,7 +1273,7 @@ export default function CalorieLogger() {
                              waterLogged: waterLoggedDays,
                          }}
                          modifiersStyles={{
-                             calorieLogged: { fontWeight: 'bold', color: 'hsl(var(--primary))' },
+                             calorieLogged: { fontWeight: 'bold' }, // Removed color override
                              waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
                          }}
                          captionLayout="dropdown-buttons" // Use dropdowns for easier navigation
@@ -1295,7 +1295,7 @@ export default function CalorieLogger() {
                              waterLogged: waterLoggedDays,
                          }}
                          modifiersStyles={{
-                             calorieLogged: { fontWeight: 'bold', color: 'hsl(var(--primary))' },
+                             calorieLogged: { fontWeight: 'bold' }, // Removed color override
                              waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
                          }}
                          captionLayout="dropdown-buttons" // Use dropdowns for month/year
