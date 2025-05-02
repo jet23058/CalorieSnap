@@ -56,34 +56,28 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
     }
 
     try {
-        // Use functional update form for setStoredValue
-        setStoredValue(prevValue => {
-            try {
-                const valueToStore = value instanceof Function ? value(prevValue) : value;
-                // Attempt to save to localStorage inside the functional update
-                window.localStorage.setItem(keyRef.current, JSON.stringify(valueToStore));
-                setError(null); // Clear error on success
-                return valueToStore; // Return the new value for React state
-            } catch (err) {
-                 // Handle potential errors during saving
-                if (err instanceof DOMException && (err.name === 'QuotaExceededError' || err.code === 22)) {
-                    console.error(`LocalStorage quota exceeded when setting key “${keyRef.current}”.`);
-                    setError(new LocalStorageError(`Failed to save data for "${keyRef.current}". Browser storage quota exceeded.`));
-                } else {
-                    console.error(`Error setting localStorage key “${keyRef.current}”:`, err);
-                    setError(new LocalStorageError(`An unexpected error occurred while saving data for "${keyRef.current}".`));
-                }
-                return prevValue; // Return previous value to prevent state change on error
-            }
-        });
+        // Determine the new value first
+        const valueToStore = value instanceof Function ? value(storedValue) : value;
 
-    } catch (outerError) {
-        // Catch errors if the `value` function itself throws before setStoredValue runs
-        console.error(`Error determining value to set for localStorage key “${keyRef.current}”:`, outerError);
-        setError(new LocalStorageError(`An error occurred while preparing data for "${keyRef.current}".`));
-        // Do not update storedValue in this case
+        // Attempt to save to localStorage
+        window.localStorage.setItem(keyRef.current, JSON.stringify(valueToStore));
+
+        // If save successful, update React state and clear error
+        setStoredValue(valueToStore);
+        setError(null);
+
+    } catch (err) {
+         // Handle potential errors during saving
+        if (err instanceof DOMException && (err.name === 'QuotaExceededError' || err.code === 22)) {
+            console.error(`LocalStorage quota exceeded when setting key “${keyRef.current}”.`);
+            setError(new LocalStorageError(`Failed to save data for "${keyRef.current}". Browser storage quota exceeded.`));
+        } else {
+            console.error(`Error setting localStorage key “${keyRef.current}”:`, err);
+            setError(new LocalStorageError(`An unexpected error occurred while saving data for "${keyRef.current}".`));
+        }
+        // Important: Do NOT update React state (setStoredValue) if localStorage saving failed
     }
-  }, []); // Empty dependency array - relies on keyRef and functional update
+  }, [storedValue]); // Add storedValue as dependency to ensure value() function uses the latest state
 
 
   // Return the state, the stable error-handling setter, and the error state

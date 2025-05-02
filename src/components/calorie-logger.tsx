@@ -279,6 +279,9 @@ export default function CalorieLogger() {
   // State to track client-side mounting for hydration fix
   const [isClient, setIsClient] = useState(false);
 
+  // Ref to track if a log operation was just attempted
+  const logAttemptedRef = useRef(false);
+
   // Set isClient to true only after component mounts on the client
   useEffect(() => {
     setIsClient(true);
@@ -293,6 +296,8 @@ export default function CalorieLogger() {
             variant: "destructive",
             duration: 7000,
         });
+        // Reset the log attempt flag if there was a storage error during logging
+        logAttemptedRef.current = false;
      }
      if (profileStorageError instanceof LocalStorageError) {
         toast({
@@ -796,20 +801,26 @@ export default function CalorieLogger() {
   }, [toast, fetchCurrentLocation]); // Added fetchCurrentLocation dependency
 
   const logCalories = () => {
+    // Set the flag indicating a log attempt
+    logAttemptedRef.current = true;
+
     // Validation for edited values before logging
     if (!editedFoodItem || !editedFoodItem.trim()) {
          toast({ title: "記錄錯誤", description: "食物品項名稱不可為空。", variant: "destructive" });
+         logAttemptedRef.current = false; // Reset flag on validation error
          return;
     }
     const parsedCalories = parseInt(editedCalorieEstimate, 10); // Parse the editable calorie string
     if (isNaN(parsedCalories) || parsedCalories < 0) {
         toast({ title: "記錄錯誤", description: "請輸入有效的卡路里數值（非負整數）。", variant: "destructive" });
+        logAttemptedRef.current = false; // Reset flag on validation error
         return;
     }
      // Validate amount
     const parsedAmount = amount === '' ? undefined : parseFloat(amount); // Allow empty string for amount
     if (amount !== '' && (parsedAmount === undefined || isNaN(parsedAmount) || parsedAmount < 0)) {
         toast({ title: "記錄錯誤", description: "請輸入有效的金額（非負數）。", variant: "destructive" });
+        logAttemptedRef.current = false; // Reset flag on validation error
         return;
     }
 
@@ -835,7 +846,7 @@ export default function CalorieLogger() {
         // Error handling is now done within the custom hook via the error state
         // No need for try-catch here, just call the setter.
         // Limit the log size (e.g., keep only the latest 100 entries)
-        const MAX_LOG_ENTRIES = 50; // Reduced max entries due to image data size
+        const MAX_LOG_ENTRIES = 20; // Further reduced max entries due to image data size
         setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
         // Toast for success moved to useEffect to ensure state update and check for storage error
 
@@ -843,6 +854,7 @@ export default function CalorieLogger() {
         // Handle errors specifically thrown by useLocalStorage hook (if any)
         // Note: The hook itself now uses internal error state, but catching here is a safeguard
         console.error("Error explicitly caught while calling setCalorieLog:", saveError);
+        logAttemptedRef.current = false; // Reset flag on save error
         if (saveError instanceof LocalStorageError) {
              toast({
                 title: "記錄儲存失敗",
@@ -871,26 +883,23 @@ export default function CalorieLogger() {
             description: errorDesc,
             variant: "destructive",
          });
+         logAttemptedRef.current = false; // Reset flag if no data to log
     }
   };
 
   // UseEffect to show success toast only after successful state update and no storage error
    useEffect(() => {
-     // Only run this effect if the component is mounted on the client
-     if (!isClient) return;
+     // Only run this effect if the component is mounted on the client and a log was attempted
+     if (!isClient || !logAttemptedRef.current) return;
 
-     // Check if the log operation might have just completed (estimationResult and imageSrc are present)
-     // and there's no storage error currently.
-     if (!storageError && !isLoading && estimationResult && imageSrc) {
+     // Check if there's no storage error currently.
+     if (!storageError) {
        // Find the potentially just added entry (assuming it's the first one after update)
        const lastEntry = calorieLog[0];
 
        // Check if the last entry matches the data we *intended* to log.
        // This is an approximation to detect if the log operation was the last state update.
        if (lastEntry && lastEntry.imageUrl === imageSrc && lastEntry.foodItem === editedFoodItem.trim()) {
-         // Check if this toast hasn't been shown for this specific entry yet.
-         // We need a way to track this. A simple approach is to clear the source data
-         // *after* showing the toast, so this condition won't match again immediately.
 
          // Show the success toast
          toast({
@@ -902,19 +911,20 @@ export default function CalorieLogger() {
          clearAll();
        }
      }
+     // Reset the log attempt flag regardless of success or failure (error handled by other effect)
+     logAttemptedRef.current = false;
+
      // Dependencies: calorieLog (to react to updates), storageError (to know if update failed),
      // isClient (to ensure client-side execution), toast (for showing messages).
-     // We intentionally don't include estimationResult, imageSrc, editedFoodItem, isLoading
-     // to prevent running the effect excessively or causing loops. The check inside the effect
-     // handles the logic based on their current values when the log updates.
-   }, [calorieLog, storageError, isClient, toast]);
+     // Include imageSrc and editedFoodItem to ensure the comparison inside uses the correct intended values.
+   }, [calorieLog, storageError, isClient, toast, imageSrc, editedFoodItem]);
 
 
   const deleteLogEntry = (id: string) => {
     try {
         // Error handling is now done within the custom hook via the error state
         // No need for try-catch here, just call the setter.
-        setCalorieLog(calorieLog.filter(entry => entry.id !== id));
+        setCalorieLog(prevLog => prevLog.filter(entry => entry.id !== id)); // Use functional update
 
         // Check storageError after update (similar caveat as in logCalories)
         // The useEffect watching storageError will handle the error toast if needed.
@@ -926,10 +936,10 @@ export default function CalorieLogger() {
          }
     } catch (deleteError) {
         // Catch potential errors thrown by the setter (though unlikely with current hook setup)
-        console.error("Error explicitly caught while deleting log entry:", deleteError);
-        if (deleteError instanceof LocalStorageError) {
-             toast({ title: "刪除錯誤", description: deleteError.message, variant: "destructive" });
-        } else {
+         console.error("Error explicitly caught while deleting log entry:", deleteError);
+         if (deleteError instanceof LocalStorageError) {
+              toast({ title: "刪除錯誤", description: deleteError.message, variant: "destructive" });
+         } else {
             toast({ title: "刪除錯誤", description: "刪除記錄項目時發生未預期的錯誤。", variant: "destructive" });
         }
     }
@@ -1051,8 +1061,8 @@ export default function CalorieLogger() {
   };
   // --- End Edit Entry Functions ---
 
-  // Handlers for User Profile Input
- const handleProfileChange = useCallback((field: keyof UserProfile, value: string | number | ActivityLevel | undefined) => {
+  // Handlers for User Profile Input - Using useCallback with dependency on setUserProfile
+ const handleProfileChange = useCallback((field: keyof UserProfile, value: string | ActivityLevel | undefined) => {
     setUserProfile(prev => {
         const newProfile = { ...prev };
         let processedValue: number | ActivityLevel | undefined;
@@ -1061,19 +1071,20 @@ export default function CalorieLogger() {
             const numValue = value === '' ? undefined : parseFloat(value as string);
             processedValue = numValue !== undefined && !isNaN(numValue) && numValue >= 0 ? numValue : undefined;
         } else if (field === 'activityLevel') {
-            // Ensure the value is one of the valid ActivityLevel keys
             const validLevels = Object.keys(activityLevelTranslations);
             processedValue = validLevels.includes(value as string) ? (value as ActivityLevel) : undefined;
         } else {
-             // Should not happen with current fields, but good practice
              return prev;
         }
 
-        // Update the profile object directly - this might be causing the issue if setUserProfile triggers re-renders
-        newProfile[field] = processedValue;
-        return newProfile; // Return the updated profile for the hook to process
+        // Check if the value actually changed before updating
+        if (newProfile[field] !== processedValue) {
+           newProfile[field] = processedValue;
+           return newProfile;
+        }
+        return prev; // No change, return previous state
     });
- }, [setUserProfile]); // Dependency array should include setUserProfile from the hook
+ }, [setUserProfile]);
 
 
   const estimatedDailyNeeds = useMemo(() => calculateEstimatedNeeds(userProfile), [userProfile]);
