@@ -791,7 +791,7 @@ export default function CalorieLogger() {
   const bmr = useMemo(() => calculateBMR(userProfile), [userProfile]);
   const dailyCalories = useMemo(() => calculateDailyCalories(userProfile), [userProfile]);
   const bmi = useMemo(() => calculateBMI(userProfile), [userProfile]);
-  const recommendedWater = useMemo(() => calculateRecommendedWater(userProfile), [userProfile]);
+  const calculatedRecommendedWater = useMemo(() => calculateRecommendedWater(userProfile), [userProfile]); // Renamed for clarity
   const defaultWaterTarget = 2000; // Default target if profile is incomplete or weight not set
 
 
@@ -884,7 +884,7 @@ export default function CalorieLogger() {
        return entries.reduce((total, entry) => total + entry.amount, 0);
    }, [waterLog, selectedDate, isClient]);
 
-   const currentRecommendedWater = recommendedWater ?? defaultWaterTarget; // Use default if null
+   const currentRecommendedWater = calculatedRecommendedWater ?? defaultWaterTarget; // Use default if null
    const waterProgress = currentRecommendedWater ? Math.min((selectedDateWaterIntake / currentRecommendedWater) * 100, 100) : 0;
 
    // Calculate yesterday's water intake and achievement
@@ -1267,7 +1267,7 @@ export default function CalorieLogger() {
                          className="rounded-md border shadow-sm"
                          disabled={date => date > new Date() || date < new Date("1900-01-01")}
                          initialFocus
-                         locale={zhTW}
+                         locale={zhTW} // Ensure locale is passed
                          modifiers={{
                              calorieLogged: calorieLoggedDays,
                              waterLogged: waterLoggedDays,
@@ -1276,6 +1276,9 @@ export default function CalorieLogger() {
                              calorieLogged: { fontWeight: 'bold', color: 'hsl(var(--primary))' },
                              waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
                          }}
+                         captionLayout="dropdown-buttons" // Use dropdowns for easier navigation
+                         fromYear={2020} // Example start year
+                         toYear={new Date().getFullYear()} // Current year
                      />
                  ) : (
                      <Calendar
@@ -1286,7 +1289,7 @@ export default function CalorieLogger() {
                          month={selectedDate} // Control the displayed month
                          className="rounded-md border shadow-sm"
                          disabled={date => date > new Date() || date < new Date("1900-01-01")}
-                         locale={zhTW}
+                         locale={zhTW} // Ensure locale is passed
                          modifiers={{
                              calorieLogged: calorieLoggedDays,
                              waterLogged: waterLoggedDays,
@@ -1400,8 +1403,8 @@ export default function CalorieLogger() {
                     <Droplet size={24} className="text-blue-500" /> 每日飲水追蹤 {selectedDate && `(${format(selectedDate, 'MM/dd')})`}
                 </CardTitle>
                  <CardDescription>
-                      {recommendedWater !== null
-                          ? `個人建議飲水量：${recommendedWater} 毫升 (約 ${Math.ceil(recommendedWater / 250)} 杯)`
+                      {calculatedRecommendedWater !== null
+                          ? `個人建議飲水量：${calculatedRecommendedWater} 毫升 (約 ${Math.ceil(calculatedRecommendedWater / 250)} 杯)`
                           : `建議飲水量：${defaultWaterTarget} 毫升 (約 ${Math.ceil(defaultWaterTarget / 250)} 杯 - 請完成個人資料以取得個人化建議)`
                       }
                       {userProfile.weight && <span className="text-xs"> (基於 {userProfile.weight} 公斤體重)</span>}
@@ -1651,7 +1654,7 @@ export default function CalorieLogger() {
                  <span className="text-muted-foreground">{dailyCalories ? Math.round(dailyCalories) + ' 卡' : 'N/A'}</span>
 
                   <span className="font-medium text-foreground">建議飲水量：</span>
-                  <span className="text-muted-foreground">{recommendedWater ? `${recommendedWater} 毫升` : 'N/A'}</span>
+                  <span className="text-muted-foreground">{calculatedRecommendedWater ? `${calculatedRecommendedWater} 毫升` : 'N/A'}</span>
              </div>
               {/* Apple Health Integration Button */}
               <div className="pt-4">
