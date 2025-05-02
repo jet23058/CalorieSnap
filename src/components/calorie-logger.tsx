@@ -159,8 +159,8 @@ const calculateBMI = (profile: UserProfile): number | null => {
 
 // Helper function to calculate Recommended Water Intake (simple version)
 // Example: 35ml per kg of body weight (adjust as needed)
-const calculateRecommendedWater = (profile: UserProfile): number => {
-    if (!profile.weight) return 2000; // Default to 2000ml if no weight
+const calculateRecommendedWater = (profile: UserProfile): number | null => {
+    if (!profile.weight) return null; // Return null if no weight
     return Math.round(profile.weight * 35);
 };
 
@@ -726,6 +726,9 @@ export default function CalorieLogger() {
   // --- Profile Handling ---
 
   const handleProfileChange = (field: keyof UserProfile, value: any) => {
+      // Prevent updates on server
+      if (!isClient) return;
+
       let processedValue = value;
       // Ensure numeric fields are stored as numbers or null
       if (field === 'age' || field === 'height' || field === 'weight') {
@@ -763,6 +766,8 @@ export default function CalorieLogger() {
   const dailyCalories = useMemo(() => calculateDailyCalories(userProfile), [userProfile]);
   const bmi = useMemo(() => calculateBMI(userProfile), [userProfile]);
   const recommendedWater = useMemo(() => calculateRecommendedWater(userProfile), [userProfile]);
+  const defaultWaterTarget = 2000; // Default target if profile is incomplete or weight not set
+
 
   // --- Water Tracking ---
 
@@ -800,8 +805,8 @@ export default function CalorieLogger() {
   };
 
   const todayWaterIntake = isClient ? (waterLog[getCurrentDate()] || 0) : 0; // Guard access
-  const waterProgress = recommendedWater ? Math.min((todayWaterIntake / (recommendedWater || 2000)) * 100, 100) : 0; // Use default target if recommended is null
-  const defaultWaterTarget = 2000; // Default target if profile is incomplete
+  const currentRecommendedWater = recommendedWater ?? defaultWaterTarget; // Use default if null
+  const waterProgress = currentRecommendedWater ? Math.min((todayWaterIntake / currentRecommendedWater) * 100, 100) : 0;
 
 
   // --- Rendering ---
@@ -1078,14 +1083,17 @@ export default function CalorieLogger() {
                 <Droplet size={24} className="text-blue-500" /> 每日飲水追蹤
             </CardTitle>
              <CardDescription>
-                  建議飲水量：{recommendedWater ? `${recommendedWater} 毫升` : '請完成個人資料'} (約 {Math.ceil((recommendedWater || defaultWaterTarget) / 250)} 杯)。
+                  {recommendedWater !== null
+                      ? `個人建議飲水量：${recommendedWater} 毫升 (約 ${Math.ceil(recommendedWater / 250)} 杯)`
+                      : `建議飲水量：${defaultWaterTarget} 毫升 (約 ${Math.ceil(defaultWaterTarget / 250)} 杯 - 請完成個人資料以取得個人化建議)`
+                  }
                   {userProfile.weight && <span className="text-xs"> (基於 {userProfile.weight} 公斤體重)</span>}
              </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
             <Progress value={waterProgress} aria-label={`今日飲水進度 ${Math.round(waterProgress)}%`} className="h-3" />
             <div className="text-center font-medium text-muted-foreground">
-                今日已喝： {todayWaterIntake} / {recommendedWater || defaultWaterTarget} 毫升 ({Math.round(waterProgress)}%)
+                今日已喝： {todayWaterIntake} / {currentRecommendedWater} 毫升 ({Math.round(waterProgress)}%)
             </div>
             <div className="flex justify-center gap-2 flex-wrap">
                 <Button onClick={() => addWater(250)} variant="outline" size="sm" disabled={!isClient}>
@@ -1505,7 +1513,7 @@ export default function CalorieLogger() {
             <TabsContent value="logging" className="pt-4">
                  <Card className="mb-6 shadow-md">
                     <CardHeader>
-                        <CardTitle className="flex items-center gap-2"><Camera size={24} /> 點擊選擇上傳影像或拍攝照片</CardTitle>
+                        <CardTitle className="flex items-center gap-2"><Camera size={24} /> 拍攝或上傳食物照片</CardTitle>
                         <CardDescription>使用您的相機拍攝食物照片，或從您的裝置上傳影像。</CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -1604,3 +1612,4 @@ export default function CalorieLogger() {
   );
 }
 
+    
