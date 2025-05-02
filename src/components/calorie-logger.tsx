@@ -1661,12 +1661,7 @@ export default function CalorieLogger() {
                         onValueChange={(value) => handleProfileChange('activityLevel', value as ActivityLevel | undefined)}
                     >
                         <SelectTrigger id="activityLevel" aria-label="選取活動水平">
-                           {/* Hydration fix: Conditionally render SelectValue */}
-                           {isClient ? (
-                               <SelectValue placeholder="選取您的活動水平" />
-                           ) : (
-                                <span className="text-muted-foreground">選取您的活動水平</span> // Placeholder text for server render
-                           )}
+                          <SelectValue placeholder="選取您的活動水平" />
                         </SelectTrigger>
                         <SelectContent>
                             {Object.entries(activityLevelTranslations).map(([key, label]) => (
