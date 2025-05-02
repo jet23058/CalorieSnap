@@ -81,7 +81,7 @@ async input => {
   const {output} = await prompt(input);
   // Ensure output matches the schema, especially when isFoodItem is false
   if (!output) {
-     throw new Error("AI flow did not return a valid output.");
+     throw new Error("AI 流程未傳回有效的輸出。"); // Translated error
   }
   // The prompt now handles setting defaults for non-food items.
   // We rely on Genkit's schema validation (implicit in definePrompt/defineFlow)

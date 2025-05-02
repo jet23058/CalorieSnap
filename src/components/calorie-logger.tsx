@@ -239,7 +239,7 @@ const formatDateTimeLocal = (timestamp: number): string => {
     const minutes = date.getMinutes().toString().padStart(2, '0');
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   } catch (e) {
-    console.error("Error formatting timestamp:", e);
+    console.error("格式化時間戳記時發生錯誤:", e); // Translated error
     return '';
   }
 };
@@ -252,7 +252,7 @@ const parseDateTimeLocal = (dateTimeString: string): number | null => {
     if (!isValid(date)) return null; // Check if parsed date is valid
     return date.getTime();
   } catch (e) {
-    console.error("Error parsing date/time string:", e);
+    console.error("解析日期/時間字串時發生錯誤:", e); // Translated error
     return null;
   }
 };
@@ -363,14 +363,14 @@ export default function CalorieLogger() {
     calorieLog.forEach(entry => {
        // Basic validation for entry structure
        if (!entry || typeof entry !== 'object' || !entry.timestamp || typeof entry.timestamp !== 'number') {
-            console.warn("Skipping invalid log entry:", entry);
+            console.warn("正在跳過無效的記錄項目:", entry); // Translated warning
             return;
         }
 
        try {
            const entryDateObj = new Date(entry.timestamp);
            if (!isValid(entryDateObj)) {
-                console.warn("Skipping log entry with invalid timestamp:", entry);
+                console.warn("正在跳過具有無效時間戳記的記錄項目:", entry); // Translated warning
                 return;
             }
 
@@ -397,7 +397,7 @@ export default function CalorieLogger() {
             summaries[entryDate].entries.push(entry);
 
        } catch (dateError) {
-           console.error("Error processing date for log entry:", entry, dateError);
+           console.error("處理記錄項目的日期時發生錯誤:", entry, dateError); // Translated error
        }
     });
 
@@ -552,7 +552,7 @@ export default function CalorieLogger() {
       });
 
      } else {
-         console.warn("Image dimensions are zero on load, cannot set initial crop.");
+         console.warn("影像載入時尺寸為零，無法設定初始裁切。"); // Translated warning
          // Fallback crop if dimensions are zero
          setCrop({ unit: '%', width: 100, height: 100, x: 0, y: 0 });
      }
@@ -588,7 +588,7 @@ export default function CalorieLogger() {
         await estimateCalories(croppedDataUrl); // Estimate calories on the cropped image
 
       } catch (cropError) {
-        console.error("影像裁切失敗:", cropError);
+        console.error("影像裁切失敗:", cropError); // Translated error
         setError(`影像裁切失敗: ${cropError instanceof Error ? cropError.message : 'Unknown error'}`);
         toast({
           title: "處理錯誤",
@@ -633,7 +633,7 @@ export default function CalorieLogger() {
         mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch (err) {
         // Fallback to default camera if environment camera fails
-        console.warn("Environment camera failed, trying default:", err);
+        console.warn("後置相機失敗，嘗試預設相機:", err); // Translated warning
         mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
       }
 
@@ -643,7 +643,7 @@ export default function CalorieLogger() {
         videoRef.current.setAttribute('playsinline', 'true'); // Important for iOS Safari
         // Attempt to play the video
         videoRef.current.play().catch(playError => {
-            console.error("Video play failed:", playError);
+            console.error("影片播放失敗:", playError); // Translated error
              toast({
                 title: "相機預覽錯誤",
                 description: "無法啟動相機預覽。",
@@ -704,7 +704,7 @@ export default function CalorieLogger() {
 
        // Check if dimensions are valid before drawing
        if (videoWidth === 0 || videoHeight === 0) {
-          console.error("Video dimensions are zero, cannot take picture yet.");
+          console.error("影片尺寸為零，尚無法拍攝照片。"); // Translated error
            toast({ title: "拍攝錯誤", description: "相機畫面尚未就緒。", variant: "destructive" });
            setIsLoading(false);
            return;
@@ -724,11 +724,11 @@ export default function CalorieLogger() {
            dataUri = canvas.toDataURL('image/jpeg', IMAGE_QUALITY);
              // Fallback for browsers that might not support jpeg canvas output well
              if (!dataUri || dataUri === 'data:,') {
-                console.warn("toDataURL('image/jpeg') failed, falling back to png.");
+                console.warn("toDataURL('image/jpeg') 失敗，改用 png 格式。"); // Translated warning
                 dataUri = canvas.toDataURL('image/png');
             }
         } catch (e) {
-             console.error("Error creating data URL from canvas:", e);
+             console.error("從畫布建立資料 URI 時發生錯誤:", e); // Translated error
              toast({ title: "拍攝錯誤", description: "無法處理拍攝的影像。", variant: "destructive" });
              closeCamera();
              setIsLoading(false);
@@ -738,7 +738,7 @@ export default function CalorieLogger() {
 
          // Validate the generated data URI
          if (!dataUri || dataUri === 'data:,') {
-             console.error("Failed to get data URI from canvas.");
+             console.error("無法從畫布取得資料 URI。"); // Translated error
              toast({ title: "拍攝錯誤", description: "無法從相機擷取有效的影像。", variant: "destructive" });
              closeCamera();
              setIsLoading(false);
@@ -919,7 +919,7 @@ export default function CalorieLogger() {
 
       } catch (saveError) {
         // Catch errors specifically from setCalorieLog (though unlikely with state updates)
-        console.error("Error explicitly caught while calling setCalorieLog:", saveError);
+        console.error("呼叫 setCalorieLog 時明確捕捉到的錯誤:", saveError); // Translated error
         logAttemptedRef.current = false; // Reset flag on save error
         if (saveError instanceof LocalStorageError) {
              // Show specific LocalStorageError message
@@ -995,7 +995,7 @@ export default function CalorieLogger() {
          }
     } catch (deleteError) {
          // Catch potential errors during state update (less likely)
-         console.error("Error explicitly caught while deleting log entry:", deleteError);
+         console.error("刪除記錄項目時明確捕捉到的錯誤:", deleteError); // Translated error
          if (deleteError instanceof LocalStorageError) {
               // Show specific storage error
               toast({ title: "刪除錯誤", description: deleteError.message, variant: "destructive", duration: 7000 });
@@ -1120,7 +1120,7 @@ export default function CalorieLogger() {
          // If a storage error *did* occur, the useEffect hook will show the error toast
     } catch (saveError) {
          // Catch unexpected errors during the state update itself (less likely)
-         console.error("Error explicitly caught while saving edited entry:", saveError);
+         console.error("儲存編輯後的項目時明確捕捉到的錯誤:", saveError); // Translated error
          if (saveError instanceof LocalStorageError) {
               toast({ title: "更新錯誤", description: saveError.message, variant: "destructive", duration: 7000 });
          } else {
@@ -1164,7 +1164,7 @@ export default function CalorieLogger() {
          // If a storage error occurred, the useEffect will handle the toast
     } catch (saveError) {
         // Catch unexpected errors during state update
-        console.error("Error explicitly caught while saving water log:", saveError);
+        console.error("儲存飲水記錄時明確捕捉到的錯誤:", saveError); // Translated error
          if (saveError instanceof LocalStorageError) {
              toast({ title: "飲水記錄錯誤", description: saveError.message, variant: "destructive", duration: 7000 });
          } else {
@@ -1501,7 +1501,7 @@ export default function CalorieLogger() {
                         style={{ objectFit: 'cover' }} className="rounded-md" data-ai-hint="食物 盤子 物件" loading="lazy" // Lazy load images in the log
                         // Error handling for broken image links
                         onError={(e) => {
-                            console.warn(`Error loading image for entry ${entry.id}`, e);
+                            console.warn(`載入項目 ${entry.id} 的影像時發生錯誤`, e); // Translated warning
                              e.currentTarget.style.display = 'none'; // Hide the broken image
                              // Show the fallback icon
                              const parentDiv = e.currentTarget.parentElement;
@@ -2096,11 +2096,11 @@ export default function CalorieLogger() {
                        try {
                            summaryDate = parseISO(summary.date); // Assumes 'yyyy-MM-dd' format
                            if (!isValid(summaryDate)) {
-                              console.warn(`Invalid date string in summary: ${summary.date}`);
+                              console.warn(`摘要中的日期字串無效: ${summary.date}`); // Translated warning
                               summaryDate = null; // Handle invalid dates
                            }
                        } catch (e) {
-                           console.error(`Error parsing date string in summary: ${summary.date}`, e);
+                           console.error(`解析摘要中的日期字串時發生錯誤: ${summary.date}`, e); // Translated error
                            summaryDate = null;
                        }
 
