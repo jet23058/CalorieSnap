@@ -90,10 +90,10 @@ export interface CalorieLogEntry {
   foodItem: string;
   calorieEstimate: number;
   imageUrl: string | null; // Can be null if no image or during loading
-  timestamp: string; // ISO string format
+  timestamp: string; // ISO string format (UTC recommended)
   mealType: MealType | null;
   location: string | null;
-  cost: number | null;
+  cost: number | null; // Changed to number | null
   notes?: string; // Optional user notes
   confidence?: number; // AI confidence score (0-1)
   nutritionistComment?: string; // Placeholder for nutritionist comments
@@ -219,6 +219,25 @@ const calculateRecommendedWater = (profile: UserProfile): number | null => {
 const getCurrentDate = (): string => {
     return format(startOfDay(new Date()), 'yyyy-MM-dd'); // Ensure it's just the date part
 };
+
+// Helper function to format ISO string to YYYY-MM-DDTHH:mm for local time input
+function formatISOToLocalDateTimeString(isoString: string): string {
+    try {
+        const date = new Date(isoString);
+        if (!isValidDate(date)) return ''; // Return empty string if invalid date
+
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
+    } catch (e) {
+        console.error("Error formatting ISO string to local datetime:", e);
+        return '';
+    }
+}
 
 
 export default function CalorieLogger() {
@@ -759,38 +778,43 @@ export default function CalorieLogger() {
 
   const handleEditChange = (field: keyof CalorieLogEntry, value: any) => {
     if (editingEntry) {
-      let processedValue = value;
-       // Ensure numeric fields are handled correctly
-       if (field === 'calorieEstimate') {
-           processedValue = value === '' ? 0 : parseInt(value, 10); // Default to 0 if empty or invalid
-           if (isNaN(processedValue)) {
-               processedValue = 0;
-           }
-       } else if (field === 'cost') {
-           processedValue = value === '' ? null : parseFloat(value);
-           if (isNaN(processedValue as number)) {
-               processedValue = null;
-           }
-       }
-       // Handle timestamp
-       else if (field === 'timestamp' && typeof value === 'string') {
-           const date = new Date(value);
-           if (isValidDate(date)) {
-               processedValue = date.toISOString();
-           } else {
-               // Keep original timestamp if input is invalid
-               processedValue = editingEntry.timestamp;
-               toast({ variant: 'destructive', title: '無效日期', description: '請輸入有效的日期和時間。' });
-           }
-       }
-       // Handle meal type selection where "none" means null
-       else if (field === 'mealType' && value === 'none') {
-           processedValue = null;
-       }
+        let processedValue = value;
+        // Ensure numeric fields are handled correctly
+        if (field === 'calorieEstimate') {
+            processedValue = value === '' ? 0 : parseInt(value, 10); // Default to 0 if empty or invalid
+            if (isNaN(processedValue)) {
+                processedValue = 0;
+            }
+        } else if (field === 'cost') {
+            processedValue = value === '' ? null : parseFloat(value); // Allow empty string to become null
+            if (isNaN(processedValue as number)) {
+                processedValue = null; // Ensure it's null if not a valid number
+            }
+        }
+        // Handle timestamp: convert local input string to ISO string (UTC)
+        else if (field === 'timestamp' && typeof value === 'string') {
+            try {
+                const date = new Date(value); // This parses the local time string
+                if (isValidDate(date)) {
+                    processedValue = date.toISOString(); // Convert to ISO string (UTC)
+                } else {
+                    // Keep original timestamp if input is invalid
+                    processedValue = editingEntry.timestamp;
+                    toast({ variant: 'destructive', title: '無效日期', description: '請輸入有效的日期和時間。' });
+                }
+            } catch (e) {
+                 processedValue = editingEntry.timestamp;
+                 toast({ variant: 'destructive', title: '日期轉換錯誤', description: '無法處理輸入的日期。' });
+            }
+        }
+        // Handle meal type selection where "none" means null
+        else if (field === 'mealType' && value === 'none') {
+            processedValue = null;
+        }
 
-      setEditingEntry(prev => prev ? { ...prev, [field]: processedValue } : null);
+        setEditingEntry(prev => prev ? { ...prev, [field]: processedValue } : null);
     }
-  };
+};
 
 
   const saveEdit = () => {
@@ -857,7 +881,7 @@ export default function CalorieLogger() {
          if (value === 'none') {
              processedValue = null;
          } else if (value !== null && !(value in activityLevelMultipliers)) {
-              processedValue = null; // Or maybe keep previous value? For now, nullify.
+              processedValue = userProfile.activityLevel; // Keep previous value if invalid selection
          }
       }
       // Ensure gender is one of the valid options or null
@@ -865,7 +889,7 @@ export default function CalorieLogger() {
           if (value === 'none') {
               processedValue = null;
           } else if (value !== null && !['male', 'female', 'other'].includes(value)) {
-             processedValue = null;
+             processedValue = userProfile.gender; // Keep previous value
           }
       }
        // Ensure healthGoal is one of the valid options or null
@@ -873,7 +897,7 @@ export default function CalorieLogger() {
          if (value === 'none') {
              processedValue = null;
          } else if (value !== null && !['muscleGain', 'fatLoss', 'maintenance'].includes(value)) {
-             processedValue = null;
+             processedValue = userProfile.healthGoal; // Keep previous value
          }
       }
 
@@ -1862,10 +1886,10 @@ export default function CalorieLogger() {
                          <Input
                              id="edit-timestamp"
                              type="datetime-local" // Use datetime-local for date and time
-                             value={editingEntry.timestamp ? editingEntry.timestamp.substring(0, 16) : ''} // Format for input YYYY-MM-DDTHH:mm
-                             onChange={(e) => handleEditChange('timestamp', e.target.value)}
+                              value={editingEntry.timestamp ? formatISOToLocalDateTimeString(editingEntry.timestamp) : ''} // Format ISO to local for input
+                             onChange={(e) => handleEditChange('timestamp', e.target.value)} // Input value is local time string
                              className="col-span-3"
-                             max={new Date().toISOString().substring(0, 16)} // Prevent selecting future dates/times
+                             max={formatISOToLocalDateTimeString(new Date().toISOString())} // Prevent selecting future dates/times
                          />
                      </div>
                       {/* Meal Type */}
@@ -1912,7 +1936,7 @@ export default function CalorieLogger() {
                              type="number"
                              step="0.01"
                              min="0" // Cost cannot be negative
-                             value={editingEntry.cost === null ? '' : editingEntry.cost.toString()} // Ensure value is string for input
+                             value={editingEntry.cost === null ? '' : String(editingEntry.cost)} // Ensure value is string for input
                              onChange={(e) => handleEditChange('cost', e.target.value)}
                              className="col-span-3"
                              placeholder="輸入金額 (選填)"
@@ -2300,5 +2324,7 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
+
+    
 
     
