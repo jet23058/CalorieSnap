@@ -18,6 +18,8 @@ import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, Do
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog'; // Import Dialog components including DialogDescription
 import ReactCrop, { type Crop as CropType, centerCrop, makeAspectCrop, PixelCrop } from 'react-image-crop'; // Import react-image-crop
 import 'react-image-crop/dist/ReactCrop.css'; // Import css styles for react-image-crop
+import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for placeholder
+
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 const mealTypeTranslations: Record<MealType, string> = {
@@ -183,6 +185,14 @@ export default function CalorieLogger() {
   const [isCropping, setIsCropping] = useState(false);
   const [crop, setCrop] = useState<CropType>(); // Crop area state
   const [completedCrop, setCompletedCrop] = useState<PixelCrop>(); // Completed crop state (in pixels)
+
+  // State to track client-side mounting for hydration fix
+  const [isClient, setIsClient] = useState(false);
+
+  // Set isClient to true only after component mounts on the client
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
 
   // Cleanup camera stream on unmount or when camera is closed
@@ -1026,7 +1036,24 @@ export default function CalorieLogger() {
           <CardContent>
             {/* Adjust height based on viewport, ensure scrollbar visible */}
              <ScrollArea className="h-[calc(100vh-250px)] min-h-[400px] pr-3"> {/* Example height, adjust as needed */}
-              {calorieLog.length === 0 ? (
+              {/* Hydration Fix: Only render log content on the client */}
+              {!isClient ? (
+                 <div className="space-y-4">
+                     {/* Render Skeletons or placeholder while waiting for client mount */}
+                     {[...Array(3)].map((_, index) => (
+                         <div key={index} className="flex items-start space-x-4 p-1">
+                           <Skeleton className="w-16 h-16 sm:w-20 sm:h-20 rounded-md flex-shrink-0" />
+                           <div className="flex-1 space-y-2">
+                             <Skeleton className="h-4 w-3/4 rounded" />
+                             <Skeleton className="h-4 w-1/4 rounded" />
+                             <Skeleton className="h-3 w-1/2 rounded" />
+                             <Skeleton className="h-3 w-2/3 rounded" />
+                           </div>
+                           <Skeleton className="w-8 h-8 rounded-full" />
+                         </div>
+                     ))}
+                 </div>
+              ) : calorieLog.length === 0 ? (
                  <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4 pt-16"> {/* Added padding top */}
                     <UtensilsCrossed className="w-12 h-12 mb-4 opacity-50" />
                     <p className="text-lg font-medium">您的記錄是空的</p>
@@ -1057,6 +1084,13 @@ export default function CalorieLogger() {
                                         (e.target as HTMLImageElement).src = ''; // Clear src
                                         (e.target as HTMLImageElement).style.display = 'none'; // Hide broken image icon
                                         // You might want to show the ImageOff icon here instead programmatically
+                                        const parentDiv = (e.target as HTMLImageElement).parentElement;
+                                        if(parentDiv){
+                                             const icon = document.createElement('span'); // Or render the lucide icon properly
+                                             icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off w-8 h-8"><path d="M11 19.59V15l-2.3 2.3a1 1 0 0 1-1.4 0l-1.7-1.7a1 1 0 0 1 0-1.4L8.6 11"/><path d="m15 11 1.4-1.4a1 1 0 0 1 1.4 0l1.7 1.7a1 1 0 0 1 0 1.4L17 15"/><line x1="2" x2="22" y1="2" y2="22"/><path d="M8.5 11.5 5 15l4 4"/><path d="M14 14l3-3 4 4"/><path d="M21 15V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v10c0 .4.1.8.4 1.1"/></svg>';
+                                             icon.className = "text-muted-foreground opacity-50";
+                                             parentDiv.appendChild(icon);
+                                        }
                                     }}
                                 />
                             ) : (
