@@ -1563,8 +1563,8 @@ export default function CalorieLogger() {
                     </>
                 ) : (
                     <>
-                        {/* Use truncate utility, allow word breaking */}
-                        <p className="font-semibold text-base truncate break-words">{entry.foodItem || '未知食物'}</p>
+                        {/* Removed 'truncate', kept 'break-words' */}
+                        <p className="font-semibold text-base break-words">{entry.foodItem || '未知食物'}</p>
                         <p className="text-sm text-primary">
                            {typeof entry.calorieEstimate === 'number' && !isNaN(entry.calorieEstimate) ? entry.calorieEstimate : '??'} 大卡
                         </p>
@@ -1584,8 +1584,8 @@ export default function CalorieLogger() {
                             {entry.location && (
                                 <div className="flex items-center">
                                     <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
-                                     {/* Use truncate utility, allow word breaking */}
-                                    <span className="truncate break-words">{entry.location}</span>
+                                     {/* Removed 'truncate', kept 'break-words' */}
+                                    <span className="break-words">{entry.location}</span>
                                 </div>
                             )}
                             {entry.amount !== undefined && entry.amount !== null && typeof entry.amount === 'number' && !isNaN(entry.amount) && (
