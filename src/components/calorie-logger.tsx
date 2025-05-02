@@ -49,7 +49,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog'; // Import Dialog components
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose, DialogDescription } from "@/components/ui/dialog"; // Import Dialog components
 import ReactCrop, { type Crop, centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { Sheet, SheetTrigger } from '@/components/ui/sheet'; // Import Sheet components
@@ -1159,9 +1159,27 @@ export default function CalorieLogger() {
                  <Button onClick={() => addWater(-250)} variant="outline" size="sm" disabled={!isClient || todayWaterIntake <= 0}>
                      <Trash2 className="mr-1 h-4 w-4" /> 移除 250ml
                  </Button>
-                <Button onClick={resetWater} variant="destructive" size="sm" disabled={!isClient}>
-                    <RotateCw className="mr-1 h-4 w-4" /> 重設今日
-                </Button>
+                 <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                         <Button variant="destructive" size="sm" disabled={!isClient}>
+                           <RotateCw className="mr-1 h-4 w-4" /> 重設今日
+                         </Button>
+                     </AlertDialogTrigger>
+                     <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>確定要重設今日飲水量嗎？</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                這將把今日的飲水量設回 0 毫升。此操作無法復原。
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>取消</AlertDialogCancel>
+                            <AlertDialogAction onClick={resetWater}>
+                                確認重設
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                     </AlertDialogContent>
+                 </AlertDialog>
             </div>
         </CardContent>
         <CardFooter className="text-xs text-muted-foreground">
@@ -1466,7 +1484,7 @@ export default function CalorieLogger() {
                              <SelectValue placeholder="選取生理性別" />
                          </SelectTrigger>
                          <SelectContent>
-                             <SelectItem value="">-- 未設定 --</SelectItem>
+                              <SelectItem value="">-- 未設定 --</SelectItem>
                              <SelectItem value="male">男性</SelectItem>
                              <SelectItem value="female">女性</SelectItem>
                              <SelectItem value="other">其他</SelectItem>
@@ -1668,4 +1686,5 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
+
 
