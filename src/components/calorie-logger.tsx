@@ -100,7 +100,7 @@ export default function CalorieLogger() {
       },
       (geoError) => {
         // Log specific error details
-        console.error("取得地點時發生錯誤:", geoError.message || 'No message', 'Code:', geoError.code || 'No code', geoError);
+        console.error(`取得地點時發生錯誤: ${geoError.message || 'No message'} (代碼: ${geoError.code || 'No code'})`);
 
         let description = "無法取得您的地點。";
         if (geoError.code === geoError.PERMISSION_DENIED) {
