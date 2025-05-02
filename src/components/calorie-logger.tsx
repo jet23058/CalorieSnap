@@ -941,7 +941,7 @@ export default function CalorieLogger() {
     } catch (e) {
         console.error("儲存編輯後的項目時發生錯誤:", e);
         // Handle potential LocalStorage errors during update
-        if (e instanceof LocalStorageError) {
+        if (e instanceof LocalStorageError && (e.message.includes('quota exceeded') || e.message.includes('Failed to execute \'setItem\''))) {
              toast({
                 title: "更新錯誤",
                 description: "無法更新此項目。瀏覽器儲存空間可能已滿。",
