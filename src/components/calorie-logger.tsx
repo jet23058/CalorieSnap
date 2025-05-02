@@ -292,9 +292,9 @@ export default function CalorieLogger() {
      if (storageError instanceof LocalStorageError) {
         toast({
             title: "記錄儲存錯誤",
-            description: storageError.message,
+            description: storageError.message, // Use the user-friendly message from the hook
             variant: "destructive",
-            duration: 7000,
+            duration: 9000, // Show longer
         });
         // Reset the log attempt flag if there was a storage error during logging
         logAttemptedRef.current = false;
@@ -302,7 +302,7 @@ export default function CalorieLogger() {
      if (profileStorageError instanceof LocalStorageError) {
         toast({
             title: "個人資料儲存錯誤",
-            description: profileStorageError.message,
+            description: profileStorageError.message, // Use the user-friendly message from the hook
             variant: "destructive",
             duration: 7000,
         });
@@ -417,7 +417,8 @@ export default function CalorieLogger() {
       },
       (geoError) => {
         // Log specific error details - Already improved
-        console.error(`取得地點時發生錯誤: ${geoError.message || 'No message'} (代碼: ${geoError.code || 'No code'})`, geoError);
+        console.error(`取得地點時發生錯誤 (代碼: ${geoError.code || '未知'}): ${geoError.message || '沒有訊息'}`, geoError);
+
 
         let description = "無法取得您的地點。";
         if (geoError.code === geoError.PERMISSION_DENIED) {
@@ -845,21 +846,22 @@ export default function CalorieLogger() {
         // Log the entry using the setCalorieLog setter which handles errors
         // Error handling is now done within the custom hook via the error state
         // No need for try-catch here, just call the setter.
-        // Limit the log size (e.g., keep only the latest 100 entries)
-        const MAX_LOG_ENTRIES = 20; // Further reduced max entries due to image data size
+        // Limit the log size (e.g., keep only the latest entries)
+        const MAX_LOG_ENTRIES = 10; // Further reduced max entries due to image data size
         setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
         // Toast for success moved to useEffect to ensure state update and check for storage error
 
       } catch (saveError) {
-        // Handle errors specifically thrown by useLocalStorage hook (if any)
-        // Note: The hook itself now uses internal error state, but catching here is a safeguard
+        // This catch block might not be strictly necessary anymore if the hook handles errors,
+        // but kept as a safeguard.
         console.error("Error explicitly caught while calling setCalorieLog:", saveError);
         logAttemptedRef.current = false; // Reset flag on save error
         if (saveError instanceof LocalStorageError) {
              toast({
                 title: "記錄儲存失敗",
-                description: saveError.message,
+                description: saveError.message, // Display the user-friendly message
                 variant: "destructive",
+                duration: 9000, // Show longer
              });
         } else {
              toast({
@@ -938,7 +940,7 @@ export default function CalorieLogger() {
         // Catch potential errors thrown by the setter (though unlikely with current hook setup)
          console.error("Error explicitly caught while deleting log entry:", deleteError);
          if (deleteError instanceof LocalStorageError) {
-              toast({ title: "刪除錯誤", description: deleteError.message, variant: "destructive" });
+              toast({ title: "刪除錯誤", description: deleteError.message, variant: "destructive", duration: 7000 });
          } else {
             toast({ title: "刪除錯誤", description: "刪除記錄項目時發生未預期的錯誤。", variant: "destructive" });
         }
@@ -1052,7 +1054,7 @@ export default function CalorieLogger() {
         // Catch potential errors thrown by the setter (though unlikely with current hook setup)
          console.error("Error explicitly caught while saving edited entry:", saveError);
          if (saveError instanceof LocalStorageError) {
-              toast({ title: "更新錯誤", description: saveError.message, variant: "destructive" });
+              toast({ title: "更新錯誤", description: saveError.message, variant: "destructive", duration: 7000 });
          } else {
              toast({ title: "更新錯誤", description: "更新記錄項目時發生未預期的錯誤。", variant: "destructive" });
          }
@@ -1084,7 +1086,7 @@ export default function CalorieLogger() {
         }
         return prev; // No change, return previous state
     });
- }, [setUserProfile]);
+ }, [setUserProfile]); // Dependency added
 
 
   const estimatedDailyNeeds = useMemo(() => calculateEstimatedNeeds(userProfile), [userProfile]);

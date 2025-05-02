@@ -68,12 +68,14 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
 
     } catch (err) {
          // Handle potential errors during saving
+        const currentKey = keyRef.current; // Use variable for readability
         if (err instanceof DOMException && (err.name === 'QuotaExceededError' || err.code === 22)) {
-            console.error(`LocalStorage quota exceeded when setting key “${keyRef.current}”.`);
-            setError(new LocalStorageError(`Failed to save data for "${keyRef.current}". Browser storage quota exceeded.`));
+            console.error(`LocalStorage quota exceeded when setting key “${currentKey}”.`);
+            // Set a more specific and user-friendly error message
+            setError(new LocalStorageError(`無法儲存資料：瀏覽器儲存空間已滿。請嘗試刪除部分舊記錄。`));
         } else {
-            console.error(`Error setting localStorage key “${keyRef.current}”:`, err);
-            setError(new LocalStorageError(`An unexpected error occurred while saving data for "${keyRef.current}".`));
+            console.error(`Error setting localStorage key “${currentKey}”:`, err);
+            setError(new LocalStorageError(`儲存資料時發生未預期的錯誤。`));
         }
         // Important: Do NOT update React state (setStoredValue) if localStorage saving failed
     }
