@@ -243,8 +243,8 @@ export default function CalorieLogger() {
   const [loadingMessage, setLoadingMessage] = useState<string>(''); // For specific loading messages
   const [error, setError] = useState<string | null>(null);
   // Use the storage-specific type for localStorage
-  const [calorieLog, setCalorieLog] = useLocalStorage<LogEntryStorage[]>('calorieLog', []);
-  const [userProfile, setUserProfile] = useLocalStorage<UserProfile>('userProfile', {});
+  const [calorieLog, setCalorieLog, storageError] = useLocalStorage<LogEntryStorage[]>('calorieLog', []);
+  const [userProfile, setUserProfile, profileStorageError] = useLocalStorage<UserProfile>('userProfile', {});
   const [dailySummaries, setDailySummaries] = useState<DailySummary[]>([]); // State for daily summaries
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -280,6 +280,26 @@ export default function CalorieLogger() {
   useEffect(() => {
     setIsClient(true);
   }, []);
+
+  // Display storage errors using toast
+   useEffect(() => {
+     if (storageError instanceof LocalStorageError) {
+        toast({
+            title: "記錄儲存錯誤",
+            description: storageError.message,
+            variant: "destructive",
+            duration: 7000,
+        });
+     }
+     if (profileStorageError instanceof LocalStorageError) {
+        toast({
+            title: "個人資料儲存錯誤",
+            description: profileStorageError.message,
+            variant: "destructive",
+            duration: 7000,
+        });
+     }
+   }, [storageError, profileStorageError, toast]); // Depend on the error objects
 
 
   // Cleanup camera stream on unmount or when camera is closed
@@ -356,7 +376,7 @@ export default function CalorieLogger() {
         });
       },
       (geoError) => {
-        // Log specific error details
+        // Log specific error details - Already improved
         console.error(`取得地點時發生錯誤: ${geoError.message || 'No message'} (代碼: ${geoError.code || 'No code'})`, geoError);
 
         let description = "無法取得您的地點。";
@@ -769,41 +789,23 @@ export default function CalorieLogger() {
         amount: !isNaN(parsedAmount) ? parsedAmount : undefined, // Use amount from state
       };
 
-      // Log the entry
+      // Log the entry using the setCalorieLog setter which handles errors
       try {
           // Limit the log size (e.g., keep only the latest 100 entries)
           const MAX_LOG_ENTRIES = 100; // Keep this relatively low due to image data size
-          const updatedLog = [newLogEntry, ...calorieLog].slice(0, MAX_LOG_ENTRIES);
-          setCalorieLog(updatedLog);
+          setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
 
-          // Clear the current image and results/fields after logging
+          // Clear the current image and results/fields after potentially successful logging
           clearAll(); // Use the clearAll function
           toast({
               title: "記錄成功",
               description: `${newLogEntry.foodItem} (${newLogEntry.calorieEstimate} 大卡) 已新增至您的記錄中。`,
           });
       } catch (e) {
-           console.error("儲存至 localStorage 時發生錯誤:", e);
-
-           // Check if it's our custom LocalStorageError related to quota
-           if (e instanceof LocalStorageError && (e.message.includes('quota exceeded') || e.message.includes('Failed to execute \'setItem\''))) {
-                 toast({
-                    title: "記錄錯誤",
-                    description: "無法儲存此項目。瀏覽器儲存空間可能已滿。請嘗試清除部分記錄。",
-                    variant: "destructive",
-                     duration: 7000,
-                });
-               // Consider adding a button/action to manually clear older entries
-               // Automatic deletion can be risky, especially with image data.
-               // Example: Provide a button in the UI to "Clear Oldest 10 Entries"
-           } else {
-               // Handle other potential errors during setCalorieLog or JSON stringify
-                toast({
-                    title: "記錄錯誤",
-                    description: `儲存項目時發生未預期的錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`,
-                    variant: "destructive",
-                });
-           }
+            // Errors are now caught and displayed via the useEffect hook watching storageError
+            // No need to repeat toast logic here, but keep console.error for debugging.
+           console.error("Saving to localStorage failed:", e);
+           // The useEffect hook will show the toast based on storageError state.
       }
 
     } else {
@@ -829,16 +831,17 @@ export default function CalorieLogger() {
         });
     } catch (e) {
         console.error("刪除記錄項目時發生錯誤:", e);
-         // Handle potential LocalStorage errors during update (less likely for delete, but possible)
-        if (e instanceof LocalStorageError) {
-             toast({ title: "刪除錯誤", description: e.message, variant: "destructive" });
-        } else {
-            toast({
-                title: "刪除錯誤",
-                description: `移除項目時發生錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`,
-                variant: "destructive",
-            });
-        }
+        // Errors are now caught and displayed via the useEffect hook watching storageError
+        // No need to repeat toast logic here.
+        // if (e instanceof LocalStorageError) {
+        //      toast({ title: "刪除錯誤", description: e.message, variant: "destructive" });
+        // } else {
+        //     toast({
+        //         title: "刪除錯誤",
+        //         description: `移除項目時發生錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        //         variant: "destructive",
+        //     });
+        // }
     }
 };
 
@@ -940,17 +943,18 @@ export default function CalorieLogger() {
         });
     } catch (e) {
         console.error("儲存編輯後的項目時發生錯誤:", e);
-        // Handle potential LocalStorage errors during update
-        if (e instanceof LocalStorageError && (e.message.includes('quota exceeded') || e.message.includes('Failed to execute \'setItem\''))) {
-             toast({
-                title: "更新錯誤",
-                description: "無法更新此項目。瀏覽器儲存空間可能已滿。",
-                variant: "destructive",
-                duration: 7000,
-            });
-        } else {
-            toast({ title: "更新錯誤", description: `儲存變更時發生未預期的錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`, variant: "destructive" });
-        }
+        // Errors are now caught and displayed via the useEffect hook watching storageError
+        // No need to repeat toast logic here.
+        // if (e instanceof LocalStorageError && (e.message.includes('quota exceeded') || e.message.includes('Failed to execute \'setItem\''))) {
+        //      toast({
+        //         title: "更新錯誤",
+        //         description: "無法更新此項目。瀏覽器儲存空間可能已滿。",
+        //         variant: "destructive",
+        //         duration: 7000,
+        //     });
+        // } else {
+        //     toast({ title: "更新錯誤", description: `儲存變更時發生未預期的錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`, variant: "destructive" });
+        // }
     }
   };
   // --- End Edit Entry Functions ---
@@ -965,28 +969,8 @@ export default function CalorieLogger() {
         } else if (field === 'activityLevel') {
             newProfile[field] = value as ActivityLevel | undefined;
         }
-        // Add try-catch for saving user profile as well
-        try {
-           // Save to local storage immediately (assuming setUserProfile does this)
-           // Or call the setter from useLocalStorage explicitly if needed
-            return newProfile;
-        } catch (e) {
-            if (e instanceof LocalStorageError) {
-                toast({
-                    title: "個人資料儲存錯誤",
-                    description: "無法儲存個人資料變更。儲存空間可能已滿。",
-                    variant: "destructive",
-                });
-            } else {
-                toast({
-                    title: "個人資料儲存錯誤",
-                    description: `儲存個人資料時發生未預期的錯誤。`,
-                    variant: "destructive",
-                });
-            }
-             // Revert state if save failed? Or just notify.
-            return prev; // Keep previous state on error
-        }
+        // setUserProfile now handles try-catch internally
+        return newProfile;
     });
  };
 
@@ -1558,7 +1542,12 @@ export default function CalorieLogger() {
                         onValueChange={(value) => handleProfileChange('activityLevel', value as ActivityLevel)}
                     >
                         <SelectTrigger id="activityLevel" aria-label="選取活動水平">
-                            <SelectValue placeholder="選取您的活動水平" />
+                           {/* Hydration fix: Conditionally render SelectValue */}
+                           {isClient ? (
+                               <SelectValue placeholder="選取您的活動水平" />
+                           ) : (
+                                <span className="text-muted-foreground">選取您的活動水平</span> // Placeholder text for server render
+                           )}
                         </SelectTrigger>
                         <SelectContent>
                             {Object.entries(activityLevelTranslations).map(([key, label]) => (

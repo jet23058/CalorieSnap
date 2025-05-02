@@ -11,41 +11,48 @@ class LocalStorageError extends Error {
   }
 }
 
-function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void] {
-  const [storedValue, setStoredValue] = useState<T>(() => {
-    if (typeof window === "undefined") {
-      return initialValue;
-    }
-    try {
-      const item = window.localStorage.getItem(key);
-      // Add more robust parsing check
-      if (item === null) {
-        return initialValue;
+// Update the hook signature to return the error state as well
+function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void, LocalStorageError | null] {
+  const [storedValue, setStoredValue] = useState<T>(initialValue);
+  const [error, setError] = useState<LocalStorageError | null>(null);
+
+  // Effect to load the value from localStorage only on the client-side
+   useEffect(() => {
+      if (typeof window === "undefined") {
+        return; // Do nothing on the server
       }
       try {
-          const parsedItem = JSON.parse(item);
-          // Optional: Add specific checks if needed, e.g., for date validity if T includes dates
-          // Example: if (typeof parsedItem.timestamp === 'string' && !isValidDate(new Date(parsedItem.timestamp))) { ... }
-          return parsedItem;
-      } catch (parseError) {
-          console.error(`Error parsing localStorage key “${key}” with value "${item}":`, parseError);
-          // If parsing fails, reset to initial value or handle differently
-          window.localStorage.removeItem(key); // Remove corrupted item
-          return initialValue;
+        const item = window.localStorage.getItem(key);
+        if (item === null) {
+          setStoredValue(initialValue); // Keep initial value if nothing in storage
+          setError(null);
+        } else {
+          try {
+            const parsedItem = JSON.parse(item);
+            setStoredValue(parsedItem);
+            setError(null);
+          } catch (parseError) {
+            console.error(`Error parsing localStorage key “${key}” with value "${item}":`, parseError);
+            window.localStorage.removeItem(key); // Remove corrupted item
+            setStoredValue(initialValue); // Reset to initial value
+            setError(new LocalStorageError(`Failed to parse data for "${key}". Resetting to default.`));
+          }
+        }
+      } catch (err) {
+        if (err instanceof DOMException && (err.name === 'QuotaExceededError' || err.code === 22)) {
+          console.error(`LocalStorage quota exceeded when reading key “${key}”.`);
+          // Don't set initial value here if already set, but set error
+          setError(new LocalStorageError(`Could not load data for "${key}" due to full browser storage.`));
+          // Optionally alert user only once or use a less intrusive method like a persistent banner
+          // alert(`Warning: Could not load data for "${key}" because browser storage is full.`);
+        } else {
+          console.error(`Error reading localStorage key “${key}”:`, err);
+          setError(new LocalStorageError(`Failed to read data for "${key}".`));
+        }
+        // Keep initialValue in state if read fails (already set by useState)
       }
-    } catch (error) {
-       // Check specifically for QuotaExceededError on initial load
-      if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.code === 22)) {
-         console.error(`LocalStorage quota exceeded when reading key “${key}”. Data might be too large or storage is full.`);
-         // Optionally notify user or return initialValue
-         alert(`Warning: Could not load data for "${key}" because browser storage is full. Please clear some space or previous data might be lost.`);
-         return initialValue; // Return initial value if quota exceeded on load
-      } else {
-        console.error(`Error reading localStorage key “${key}”:`, error);
-        return initialValue;
-      }
-    }
-  });
+   }, [key, initialValue]); // Run only once on mount or if key/initialValue changes
+
 
   // Callback to set value, handling potential errors
   const setValue = useCallback((value: T | ((val: T) => T)) => {
@@ -54,30 +61,31 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
         return;
     }
     try {
-        // Allow value to be a function so we have the same API as useState
         const valueToStore = value instanceof Function ? value(storedValue) : value;
-        // Save state to local storage
         window.localStorage.setItem(key, JSON.stringify(valueToStore));
-        // Update state only after successful storage set
-        setStoredValue(valueToStore);
-    } catch (error) {
-        if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.code === 22)) {
-            console.error(`LocalStorage quota exceeded when setting key “${key}”. Data might be too large.`);
-            // Throw a custom error or handle it, e.g., notify the user
-             throw new LocalStorageError(`Failed to save data for "${key}". Browser storage quota exceeded. Please try freeing up space.`);
-             // Or, update state partially, or notify via toast etc.
-             // Example: toast({ variant: 'destructive', title: 'Storage Full', description: 'Could not save changes.' });
+        setStoredValue(valueToStore); // Update state only after successful storage set
+        setError(null); // Clear any previous error on success
+    } catch (err) {
+        if (err instanceof DOMException && (err.name === 'QuotaExceededError' || err.code === 22)) {
+            console.error(`LocalStorage quota exceeded when setting key “${key}”.`);
+            const quotaError = new LocalStorageError(`Failed to save data for "${key}". Browser storage quota exceeded.`);
+            setError(quotaError); // Set the error state
+            // Optionally re-throw if the caller needs to handle it immediately,
+            // but setting state is often sufficient for UI feedback.
+             // throw quotaError;
         } else {
-            console.error(`Error setting localStorage key “${key}”:`, error);
-             throw new LocalStorageError(`An unexpected error occurred while saving data for "${key}".`);
+            console.error(`Error setting localStorage key “${key}”:`, err);
+            const unknownError = new LocalStorageError(`An unexpected error occurred while saving data for "${key}".`);
+            setError(unknownError); // Set the error state
+             // throw unknownError;
         }
-        // Do not update state if setItem failed
+        // Do not update React state (storedValue) if localStorage.setItem failed
     }
   }, [key, storedValue]); // storedValue is needed if the value is a function
 
 
-  // Return the state and the error-handling setter
-  return [storedValue, setValue];
+  // Return the state, the error-handling setter, and the error state
+  return [storedValue, setValue, error];
 }
 
 export default useLocalStorage;
