@@ -84,7 +84,7 @@ type EditedEntryData = Partial<Pick<LogEntryStorage, 'foodItem' | 'calorieEstima
 
 // Compression settings
 const IMAGE_MAX_WIDTH = 1024; // Max width for the compressed image
-const IMAGE_QUALITY = 0.6; // JPEG quality (0 to 1) - Changed from 0.8 to 0.6
+const IMAGE_QUALITY = 0.2; // JPEG quality (0 to 1) - Changed from 0.6 to 0.2
 const CROP_ASPECT = 16 / 9; // Aspect ratio for the crop tool
 
 // Helper function for centering the crop - NOT USED FOR INITIAL CROP ANYMORE
@@ -1804,7 +1804,7 @@ export default function CalorieLogger() {
                                     </div>
                                   </div>
                                 </AccordionTrigger>
-                                <AccordionContent className="border-t border-border"> {/* Add border */}
+                                <AccordionContent className="border-t border-border max-h-[50vh] overflow-y-auto"> {/* Add max-height and overflow */}
                                   <div className="p-2 sm:p-4 divide-y divide-border"> {/* Adjust padding and add dividers */}
                                     {summary.entries.map((entry) => (
                                         <React.Fragment key={entry.id}>
