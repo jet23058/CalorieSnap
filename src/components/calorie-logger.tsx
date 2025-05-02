@@ -177,7 +177,7 @@ function getCroppedImg(
         };
         reader.onerror = (error) => {
             console.error("讀取裁切後的 Blob 時發生錯誤:", error);
-            reject(new Error('讀取裁切後的影像資料時失敗。'));
+            reject(new Error('讀取裁切后的影像資料時失敗。'));
         };
         reader.readAsDataURL(blob);
 
