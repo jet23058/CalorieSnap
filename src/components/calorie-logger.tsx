@@ -991,6 +991,21 @@ export default function CalorieLogger() {
     });
  }, [calorieLog, selectedDate]);
 
+ // Moved calculation outside renderLogList
+ const loggedDays = useMemo(() => {
+    if (!isClient) return []; // Don't compute on server
+    const daysWithLogs = new Set<string>();
+    calorieLog.forEach(entry => {
+        if (entry && entry.timestamp) {
+            const date = startOfDay(new Date(entry.timestamp));
+            if (isValidDate(date)) {
+                daysWithLogs.add(format(date, 'yyyy-MM-dd'));
+            }
+        }
+    });
+    return Array.from(daysWithLogs).map(dateStr => new Date(dateStr));
+ }, [calorieLog, isClient]);
+
  const renderLogList = () => {
      // Check for localStorage errors and display a persistent warning if needed
      const renderStorageError = () => {
@@ -1052,21 +1067,6 @@ export default function CalorieLogger() {
             </div>
         );
     }
-
-    // Calculate which days have logs for highlighting in the calendar
-    const loggedDays = useMemo(() => {
-        if (!isClient) return []; // Don't compute on server
-        const daysWithLogs = new Set<string>();
-        calorieLog.forEach(entry => {
-            if (entry && entry.timestamp) {
-                const date = startOfDay(new Date(entry.timestamp));
-                if (isValidDate(date)) {
-                    daysWithLogs.add(format(date, 'yyyy-MM-dd'));
-                }
-            }
-        });
-        return Array.from(daysWithLogs).map(dateStr => new Date(dateStr));
-    }, [calorieLog, isClient]);
 
 
     return (
@@ -1667,5 +1667,3 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
-
-    
