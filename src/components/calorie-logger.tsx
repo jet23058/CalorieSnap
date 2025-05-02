@@ -67,6 +67,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Calendar } from "@/components/ui/calendar"; // Import Calendar component
 import { format, isSameDay, startOfDay } from 'date-fns'; // Import date-fns helpers
+import { zhTW } from 'date-fns/locale'; // Import Traditional Chinese locale
 import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
 
 
@@ -1082,7 +1083,7 @@ export default function CalorieLogger() {
                    className="rounded-md border shadow-sm"
                    disabled={date => date > new Date() || date < new Date("1900-01-01")} // Disable future dates
                    initialFocus
-                   locale={require('date-fns/locale/zh-TW')} // Use Traditional Chinese locale
+                   locale={zhTW} // Use Traditional Chinese locale
                    modifiers={{ logged: loggedDays }} // Add modifier for logged days
                    modifiersStyles={{
                        logged: { fontWeight: 'bold', color: 'hsl(var(--primary))' }, // Style for days with logs
@@ -1093,7 +1094,7 @@ export default function CalorieLogger() {
             {selectedDate && (
                 <div>
                     <h3 className="text-lg font-medium mb-3 border-b pb-1 text-muted-foreground">
-                         {format(selectedDate, 'yyyy 年 MM 月 dd 日', { locale: require('date-fns/locale/zh-TW') })} 的記錄
+                         {format(selectedDate, 'yyyy 年 MM 月 dd 日', { locale: zhTW })} 的記錄
                     </h3>
                     {filteredLog.length > 0 ? (
                         <div className="space-y-4">
@@ -1667,3 +1668,4 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
+
