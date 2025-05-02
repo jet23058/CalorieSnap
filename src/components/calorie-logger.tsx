@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingSpinner } from '@/components/loading-spinner';
-import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban, GlassWater, Droplet, PersonStanding, CalendarDays, AlertCircle } from 'lucide-react'; // Added AlertCircle
+import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban, GlassWater, Droplet, PersonStanding, CalendarDays, AlertCircle, Maximize } from 'lucide-react'; // Added AlertCircle, Maximize
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog';
 import ReactCrop, { type Crop as CropType, centerCrop, makeAspectCrop, PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -299,6 +299,9 @@ export default function CalorieLogger() {
 
   const [waterAmountToAdd, setWaterAmountToAdd] = useState<string>('');
   const [currentWaterIntake, setCurrentWaterIntake] = useState<number>(0);
+
+  const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
+  const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     setIsClient(true);
@@ -1252,6 +1255,19 @@ export default function CalorieLogger() {
     }
   };
 
+  // Opens the image viewer dialog
+  const openImageViewer = (url: string) => {
+    setViewingImageUrl(url);
+    setIsImageViewerOpen(true);
+  };
+
+  // Closes the image viewer dialog
+  const closeImageViewer = () => {
+    setIsImageViewerOpen(false);
+    setViewingImageUrl(null);
+  };
+
+
   // Renders the estimation result card or loading/error states
   const renderEstimationResult = () => {
     // Show loading spinner while processing image or estimating
@@ -1492,13 +1508,14 @@ export default function CalorieLogger() {
         // Outer container for the entry
         <div className="flex items-start space-x-3 sm:space-x-4 py-3">
              {/* Image Thumbnail */}
-             <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden">
+             <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden group">
                 {entry.imageUrl ? (
                     <Image
                         src={entry.imageUrl}
                         alt={`記錄項目：${entry.foodItem || '未知項目'}`} // Updated alt text
                         fill sizes="(max-width: 640px) 4rem, 5rem" // Responsive sizes
-                        style={{ objectFit: 'cover' }} className="rounded-md" data-ai-hint="食物 盤子 物件" loading="lazy" // Lazy load images in the log
+                        style={{ objectFit: 'cover' }} className="rounded-md cursor-pointer" data-ai-hint="食物 盤子 物件" loading="lazy" // Lazy load images in the log
+                        onClick={() => openImageViewer(entry.imageUrl)} // Open image viewer on click
                         // Error handling for broken image links
                         onError={(e) => {
                             console.warn(`載入項目 ${entry.id} 的影像時發生錯誤`, e); // Translated warning
@@ -1514,6 +1531,15 @@ export default function CalorieLogger() {
                 ) : null }
                  {/* Fallback Icon (initially hidden if imageUrl exists) */}
                  <ImageOff size={32} aria-label="無可用影像" className={`fallback-icon ${entry.imageUrl ? 'hidden' : ''}`} />
+                  {/* Zoom icon overlay on hover */}
+                  {entry.imageUrl && (
+                    <div
+                        className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        onClick={() => openImageViewer(entry.imageUrl)}
+                    >
+                        <Maximize size={24} className="text-white" />
+                    </div>
+                 )}
             </div>
 
             {/* Entry Details (Display or Edit Form) */}
@@ -2158,6 +2184,36 @@ export default function CalorieLogger() {
           </CardContent>
         </Card>
       </div>
+        {/* Image Viewer Dialog */}
+        <Dialog open={isImageViewerOpen} onOpenChange={closeImageViewer}>
+            <DialogContent className="sm:max-w-[80vw] max-h-[80vh] p-2"> {/* Adjust size and padding */}
+                {viewingImageUrl && (
+                    <div className="relative w-full h-full flex items-center justify-center">
+                        <Image
+                            src={viewingImageUrl}
+                            alt="放大的記錄影像"
+                            layout="intrinsic" // Use intrinsic for natural sizing
+                            width={1000} // Set a large width
+                            height={1000} // Set a large height
+                            objectFit="contain" // Ensure the whole image is visible
+                            className="max-w-full max-h-[75vh]" // Limit size within the viewport
+                            data-ai-hint="食物 盤子 物件"
+                        />
+                    </div>
+                )}
+                 {/* Explicit Close Button */}
+                 <DialogClose asChild>
+                     <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute top-2 right-2 bg-black/30 hover:bg-black/50 text-white rounded-full z-10"
+                        aria-label="關閉影像檢視器"
+                    >
+                        <X size={18} />
+                    </Button>
+                 </DialogClose>
+            </DialogContent>
+        </Dialog>
     </div>
   );
 }
