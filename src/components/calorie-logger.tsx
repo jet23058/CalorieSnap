@@ -27,7 +27,7 @@ import {
   DollarSign,
   Info,
   Settings,
-  Apple,
+  Apple, // Added Apple icon
   CalendarDays,
   Trash, // Added for deleting water entries
   Cat, // Added for achievement badge
@@ -58,8 +58,8 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose, DialogDescription } from "@/components/ui/dialog";
 import ReactCrop, { type Crop, centerCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import { Sheet, SheetTrigger } from '@/components/ui/sheet';
-import { NotificationSettingsSheet, NotificationSettings, defaultSettings as defaultNotificationSettings } from '@/components/notification-settings-sheet';
+import { Sheet, SheetTrigger } from '@/components/ui/sheet'; // Import Sheet components
+import { NotificationSettingsSheet, NotificationSettings, defaultSettings as defaultNotificationSettings } from '@/components/notification-settings-sheet'; // Import the settings types
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1674,12 +1674,6 @@ export default function CalorieLogger() {
                   <span className="font-medium text-foreground">建議飲水量：</span>
                   <span className="text-muted-foreground">{calculatedRecommendedWater ? `${calculatedRecommendedWater} 毫升` : 'N/A'}</span>
              </div>
-              {/* Apple Health Integration Button */}
-              <div className="pt-4">
-                  <Button variant="outline" className="w-full" onClick={() => toast({ title: '尚未實作', description: 'Apple 健康整合即將推出！' })} disabled={!isClient}>
-                       <Apple className="mr-2 h-4 w-4" /> 連接 Apple 健康
-                  </Button>
-              </div>
         </CardContent>
         <CardFooter className="text-xs text-muted-foreground">
              基礎代謝率 (BMR) 是您身體在休息時燃燒的卡路里數量。BMI 是體重指數。
@@ -2124,6 +2118,10 @@ export default function CalorieLogger() {
                  {renderProfileEditor()}
                  {renderProfileStats()} {/* Moved profile stats here */}
                  {renderNotificationSettingsTrigger()}
+                 {/* Apple Health Integration Button moved here */}
+                  <Button variant="outline" className="w-full mt-6" onClick={() => toast({ title: '尚未實作', description: 'Apple 健康整合即將推出！' })} disabled={!isClient}>
+                      <Apple className="mr-2 h-4 w-4" /> 連接 Apple 健康
+                  </Button>
              </TabsContent>
         </Tabs>
 
