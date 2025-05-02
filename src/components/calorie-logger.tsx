@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, {
@@ -34,7 +35,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -53,6 +54,17 @@ import 'react-image-crop/dist/ReactCrop.css';
 import { Sheet, SheetTrigger } from '@/components/ui/sheet'; // Import Sheet components
 import { NotificationSettingsSheet } from '@/components/notification-settings-sheet'; // Import the new sheet component
 import { NotificationSettings, defaultSettings as defaultNotificationSettings } from '@/components/notification-settings-sheet'; // Import the settings types
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -182,15 +194,17 @@ export default function CalorieLogger() {
   const [crop, setCrop] = useState<Crop>();
   const [completedCrop, setCompletedCrop] = useState<Crop>();
   const imgRef = useRef<HTMLImageElement>(null);
-  const [aspect, setAspect] = useState<number | undefined>(1); // Aspect ratio for crop
+  const [aspect, setAspect] = useState<number | undefined>(undefined); // Aspect ratio for crop - undefined for free crop
 
 
   const { toast } = useToast();
 
   const fetchCurrentLocation = useCallback(() => {
-      if (!navigator.geolocation) {
+      if (typeof window === 'undefined' || !navigator.geolocation) {
           setCurrentLocation("瀏覽器不支援地理位置");
-          toast({ variant: 'destructive', title: '錯誤', description: '您的瀏覽器不支援地理位置功能。' });
+          if (typeof window !== 'undefined') { // Only toast on client
+             toast({ variant: 'destructive', title: '錯誤', description: '您的瀏覽器不支援地理位置功能。' });
+          }
           return;
       }
 
@@ -226,7 +240,7 @@ export default function CalorieLogger() {
   }, [toast]);
 
 
-  // Fetch location on initial mount
+  // Fetch location on initial client mount
   useEffect(() => {
       fetchCurrentLocation();
   }, [fetchCurrentLocation]);
@@ -255,13 +269,15 @@ export default function CalorieLogger() {
               }
           } else {
               setHasCameraPermission(false);
-              setCurrentLocation("不支援媒體裝置");
-              console.warn('此瀏覽器不支援 getUserMedia。');
-              toast({
-                  variant: 'destructive',
-                  title: '不支援相機',
-                  description: '您的瀏覽器不支援相機存取。請嘗試使用其他瀏覽器。',
-              });
+              if (typeof window !== 'undefined') { // Only set location/log/toast on client
+                  setCurrentLocation("不支援媒體裝置");
+                  console.warn('此瀏覽器不支援 getUserMedia。');
+                  toast({
+                      variant: 'destructive',
+                      title: '不支援相機',
+                      description: '您的瀏覽器不支援相機存取。請嘗試使用其他瀏覽器。',
+                  });
+              }
           }
       };
 
@@ -270,13 +286,17 @@ export default function CalorieLogger() {
       // Cleanup function to stop video stream when component unmounts
       return () => {
           if (videoRef.current && videoRef.current.srcObject) {
-              const stream = videoRef.current.srcObject as MediaStream;
-              const tracks = stream.getTracks();
-              tracks.forEach(track => track.stop());
-              videoRef.current.srcObject = null;
+              try {
+                 const stream = videoRef.current.srcObject as MediaStream;
+                 const tracks = stream.getTracks();
+                 tracks.forEach(track => track.stop());
+                 videoRef.current.srcObject = null;
+              } catch (e) {
+                  console.error("清理相機串流時發生錯誤:", e);
+              }
           }
       };
-  }, [toast]); // Removed fetchCurrentLocation from deps
+  }, [toast]);
 
 
   // --- Crop Logic ---
@@ -284,39 +304,60 @@ export default function CalorieLogger() {
   function centerAspectCrop(
     mediaWidth: number,
     mediaHeight: number,
-    aspect: number,
+    aspect: number | undefined, // Allow undefined for free crop
   ) {
-    return centerCrop(
-      makeAspectCrop(
-        {
-          unit: '%',
-          width: 90, // Default to 90% width crop
-        },
-        aspect,
+      if (!aspect) { // If no aspect ratio (free crop), default to full image initially
+           return centerCrop(
+             {
+               unit: '%',
+               width: 100,
+               height: 100,
+               x: 0,
+               y: 0,
+             },
+             mediaWidth,
+             mediaHeight,
+           );
+      }
+      // If aspect ratio is defined, use makeAspectCrop
+      return centerCrop(
+        makeAspectCrop(
+          {
+            unit: '%',
+            width: 90, // Default to 90% width crop when aspect is set
+          },
+          aspect,
+          mediaWidth,
+          mediaHeight,
+        ),
         mediaWidth,
         mediaHeight,
-      ),
-      mediaWidth,
-      mediaHeight,
-    );
+      );
   }
+
 
   function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
     const { width, height } = e.currentTarget;
-    // Center the crop area with 1:1 aspect ratio initially
-    setCrop(centerAspectCrop(width, height, aspect ?? 1));
-    setCompletedCrop(centerAspectCrop(width, height, aspect ?? 1)); // Also set completed crop initially
+    // Center the crop area, respecting the current aspect setting (or full if undefined)
+    const initialCrop = centerAspectCrop(width, height, aspect);
+    setCrop(initialCrop);
+    setCompletedCrop(initialCrop); // Also set completed crop initially
   }
 
 
-  const getCroppedImg = (image: HTMLImageElement, cropData: Crop, quality: number = 0.8): Promise<string | null> => {
+  const getCroppedImg = (image: HTMLImageElement, cropData: Crop, quality: number = 0.2): Promise<string | null> => { // Adjusted default quality to 0.2 (20%)
     const canvas = document.createElement('canvas');
     const scaleX = image.naturalWidth / image.width;
     const scaleY = image.naturalHeight / image.height;
-    const pixelRatio = window.devicePixelRatio || 1;
+    const pixelRatio = window.devicePixelRatio || 1; // Consider device pixel ratio for sharpness
 
-    canvas.width = Math.floor(cropData.width * scaleX * pixelRatio);
-    canvas.height = Math.floor(cropData.height * scaleY * pixelRatio);
+     // Ensure crop dimensions are positive
+     const cropWidth = Math.max(1, cropData.width);
+     const cropHeight = Math.max(1, cropData.height);
+
+     // Calculate canvas dimensions based on crop and pixel ratio
+     canvas.width = Math.floor(cropWidth * scaleX * pixelRatio);
+     canvas.height = Math.floor(cropHeight * scaleY * pixelRatio);
 
     const ctx = canvas.getContext('2d');
     if (!ctx) {
@@ -324,35 +365,41 @@ export default function CalorieLogger() {
         return Promise.resolve(null);
     }
 
-    ctx.scale(pixelRatio, pixelRatio);
-    ctx.imageSmoothingQuality = 'high';
+     // Scale context for higher resolution drawing
+     ctx.scale(pixelRatio, pixelRatio);
+     ctx.imageSmoothingQuality = 'high'; // Prefer higher quality smoothing
 
-    const cropX = cropData.x * scaleX;
-    const cropY = cropData.y * scaleY;
+     // Calculate source and destination crop coordinates
+     const sourceX = cropData.x * scaleX;
+     const sourceY = cropData.y * scaleY;
+     const sourceWidth = cropWidth * scaleX;
+     const sourceHeight = cropHeight * scaleY;
 
-    const centerX = image.naturalWidth / 2;
-    const centerY = image.naturalHeight / 2;
+     // Destination coordinates on the scaled canvas (always 0,0)
+     const destX = 0;
+     const destY = 0;
+     const destWidth = cropWidth; // Draw at the target crop size (before pixel ratio scaling)
+     const destHeight = cropHeight;
 
-    ctx.save();
-
-    // Adjust drawing parameters based on crop data
-    ctx.translate(-cropX, -cropY);
-    ctx.drawImage(
-        image,
-        0,
-        0,
-        image.naturalWidth,
-        image.naturalHeight,
-        0,
-        0,
-        image.naturalWidth,
-        image.naturalHeight
-    );
-
-    ctx.restore();
+    try {
+       ctx.drawImage(
+           image,
+           sourceX,
+           sourceY,
+           sourceWidth,
+           sourceHeight,
+           destX,
+           destY,
+           destWidth,
+           destHeight
+       );
+    } catch (drawError) {
+        console.error("繪製影像至畫布時發生錯誤:", drawError);
+        return Promise.resolve(null);
+    }
 
     return new Promise((resolve) => {
-        // Use 'image/jpeg' for better compression, adjust quality (0.0 to 1.0)
+        // Use 'image/jpeg' for better compression, use the provided quality
         const base64Image = canvas.toDataURL('image/jpeg', quality);
         if (!base64Image || base64Image === 'data:,') {
              console.error('畫布轉換為 data URL 失敗');
@@ -370,8 +417,8 @@ export default function CalorieLogger() {
         setEstimation(null); // Clear previous estimation
 
         try {
-            // Lower quality (e.g., 0.8) for smaller file size
-            const croppedDataUrl = await getCroppedImg(imgRef.current, completedCrop, 0.8); // Compress to 80% quality
+            // Use specified quality (0.2 for 20%)
+            const croppedDataUrl = await getCroppedImg(imgRef.current, completedCrop, 0.2);
             if (croppedDataUrl) {
                 setImageSrc(croppedDataUrl); // Update imageSrc with cropped version
                 await handleImageEstimation(croppedDataUrl); // Send cropped image for estimation
@@ -388,7 +435,7 @@ export default function CalorieLogger() {
             setIsCropping(false); // Close the crop dialog
         }
     } else {
-        toast({ variant: 'destructive', title: '錯誤', description: '無效的裁切區域。' });
+        toast({ variant: 'destructive', title: '錯誤', description: '無效的裁切區域。請選取一個區域。' });
     }
 };
 
@@ -412,7 +459,8 @@ export default function CalorieLogger() {
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         // Get the image data URL (defaults to PNG, consider JPEG for smaller size)
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.9); // Use JPEG with 90% quality
+        // Keep higher quality for cropping source
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9); // Use JPEG with 90% quality initially
 
         // Set for cropping
         setImageSrc(dataUrl);
@@ -455,18 +503,19 @@ export default function CalorieLogger() {
   const handleImageEstimation = async (imageDataUrl: string) => {
       setIsLoading(true);
       setError(null);
-      setEstimation(null); // Clear previous estimation while loading new one
+      // Keep previous estimation data while loading for editing calories
+      // setEstimation(null); // Don't clear estimation immediately
 
       try {
           console.log("正在估算影像...");
           const result = await estimateCalorieCount({ photoDataUri: imageDataUrl });
           console.log("估算結果:", result);
-          setEstimation(result);
+          setEstimation(result); // Update with new estimation
 
           // Display warning if not a food item, but allow logging
           if (!result.isFoodItem) {
              toast({
-                variant: "orange", // Use the new orange variant
+                variant: "orange", // Use the new orange variant if available, or default/warning
                 title: "注意：可能不是食物",
                 description: `偵測到的項目「${result.foodItem}」可能不是食物。您仍然可以記錄它，但請仔細檢查卡路里。`,
              });
@@ -479,6 +528,7 @@ export default function CalorieLogger() {
               errorMsg += ` (${e.message})`;
           }
           setError(errorMsg);
+          setEstimation(null); // Clear estimation on error
           toast({ variant: 'destructive', title: '估算錯誤', description: errorMsg });
       } finally {
           setIsLoading(false);
@@ -489,26 +539,37 @@ export default function CalorieLogger() {
   // --- Logging Logic ---
 
   const logCalories = () => {
-    if (estimation && imageSrc) {
+    // Allow logging even if only imageSrc exists (before estimation finishes or if it fails)
+    if (imageSrc) {
+        const currentEstimation = estimation; // Capture current estimation state
         const newEntry: CalorieLogEntry = {
             id: Date.now().toString(), // Simple unique ID
-            foodItem: estimation.foodItem,
-            calorieEstimate: estimation.isFoodItem ? estimation.calorieEstimate : 0, // Use 0 if not food
+            foodItem: currentEstimation?.foodItem ?? "未辨識", // Default if no estimation
+            calorieEstimate: currentEstimation?.isFoodItem ? (currentEstimation.calorieEstimate ?? 0) : 0, // Use 0 if not food or undefined
             imageUrl: imageSrc, // Log the (potentially cropped) image
             timestamp: new Date().toISOString(),
             mealType: null, // User can set this later
             location: currentLocation && currentLocation !== '正在獲取...' && !currentLocation.startsWith('無法') && !currentLocation.startsWith('瀏覽器') ? currentLocation : null, // Log location if available and not an error/loading state
             cost: null,
-            confidence: estimation.isFoodItem ? estimation.confidence : 0, // Use 0 if not food
+            confidence: currentEstimation?.isFoodItem ? (currentEstimation.confidence ?? 0) : 0, // Use 0 if not food or undefined
         };
 
       try {
-        // Use the setter function from useLocalStorage, which handles errors
-        setCalorieLog(prevLog => [newEntry, ...prevLog]);
+        // Use the setter function from useLocalStorage
+        setCalorieLog(prevLog => {
+            // Basic check to prevent excessively large logs
+            if (prevLog.length >= 100) { // Example limit: 100 entries
+                // Optionally remove the oldest entry
+                // return [newEntry, ...prevLog.slice(0, -1)];
+                throw new LocalStorageError('記錄已滿，無法新增更多項目。請刪除一些舊記錄。');
+            }
+            return [newEntry, ...prevLog];
+        });
+
 
         toast({
           title: "記錄成功",
-          description: `${estimation.foodItem} (${estimation.calorieEstimate} 卡) 已新增至您的記錄。`,
+          description: `${newEntry.foodItem} (${newEntry.calorieEstimate} 卡) 已新增至您的記錄。`,
         });
 
         // Clear image and estimation after successful logging
@@ -518,16 +579,13 @@ export default function CalorieLogger() {
         if (fileInputRef.current) {
           fileInputRef.current.value = ""; // Reset file input
         }
-      } catch (storageError) {
-         // Error handling is now primarily within useLocalStorage
-         // console.error("儲存記錄時發生 localStorage 錯誤:", storageError); // Optional: log again here
-         // The error state from useLocalStorage (logError) should be set
-         // and the toast is handled within useLocalStorage or displayed based on logError state
+      } catch (storageError: any) {
+         // Handle errors, including the one thrown above
          if (storageError instanceof LocalStorageError) {
              toast({
                  variant: 'destructive',
                  title: '儲存錯誤',
-                 description: storageError.message || '無法儲存卡路里記錄。儲存空間可能已滿。'
+                 description: storageError.message || '無法儲存卡路里記錄。儲存空間可能已滿或發生錯誤。'
              });
          } else {
               toast({
@@ -536,14 +594,24 @@ export default function CalorieLogger() {
                  description: '儲存卡路里記錄時發生未預期的錯誤。'
              });
          }
+          // Log the detailed error for debugging
+          console.error("儲存記錄時發生錯誤:", storageError);
       }
     } else {
       toast({
         variant: 'destructive',
         title: "記錄失敗",
-        description: "沒有估算或影像可記錄。",
+        description: "沒有影像可記錄。",
       });
     }
+  };
+
+  // Allow editing calorie estimate in the estimation result card
+  const handleEstimationCalorieChange = (value: string) => {
+      if (estimation) {
+          const newCalorie = parseInt(value) || 0;
+          setEstimation(prev => prev ? { ...prev, calorieEstimate: newCalorie } : null);
+      }
   };
 
   const toggleDetails = (id: string) => {
@@ -558,9 +626,39 @@ export default function CalorieLogger() {
 
   const handleEditChange = (field: keyof CalorieLogEntry, value: any) => {
     if (editingEntry) {
-      setEditingEntry(prev => prev ? { ...prev, [field]: value } : null);
+      let processedValue = value;
+       // Ensure numeric fields are handled correctly
+       if (field === 'calorieEstimate') {
+           processedValue = value === '' ? 0 : parseInt(value, 10); // Default to 0 if empty or invalid
+           if (isNaN(processedValue)) {
+               processedValue = 0;
+           }
+       } else if (field === 'cost') {
+           processedValue = value === '' ? null : parseFloat(value);
+           if (isNaN(processedValue as number)) {
+               processedValue = null;
+           }
+       }
+       // Handle timestamp
+       else if (field === 'timestamp' && typeof value === 'string') {
+           const date = new Date(value);
+           if (isValidDate(date)) {
+               processedValue = date.toISOString();
+           } else {
+               // Keep original timestamp if input is invalid
+               processedValue = editingEntry.timestamp;
+               toast({ variant: 'destructive', title: '無效日期', description: '請輸入有效的日期和時間。' });
+           }
+       }
+       // Handle meal type selection where empty string means null
+       else if (field === 'mealType' && value === '') {
+           processedValue = null;
+       }
+
+      setEditingEntry(prev => prev ? { ...prev, [field]: processedValue } : null);
     }
   };
+
 
   const saveEdit = () => {
     if (editingEntry) {
@@ -573,12 +671,13 @@ export default function CalorieLogger() {
         toast({ title: "更新成功", description: "記錄項目已更新。" });
         setIsEditing(false);
         setEditingEntry(null);
-      } catch (storageError) {
+      } catch (storageError: any) {
           if (storageError instanceof LocalStorageError) {
              toast({ variant: 'destructive', title: '儲存錯誤', description: storageError.message });
           } else {
              toast({ variant: 'destructive', title: '儲存錯誤', description: '儲存更新時發生未預期的錯誤。' });
           }
+          console.error("儲存編輯時發生錯誤:", storageError);
       }
     }
   };
@@ -588,12 +687,13 @@ export default function CalorieLogger() {
       try {
          setCalorieLog(prevLog => prevLog.filter(entry => entry.id !== id));
          toast({ title: "刪除成功", description: "記錄項目已刪除。" });
-      } catch (storageError) {
+      } catch (storageError: any) {
            if (storageError instanceof LocalStorageError) {
               toast({ variant: 'destructive', title: '刪除錯誤', description: storageError.message });
            } else {
               toast({ variant: 'destructive', title: '刪除錯誤', description: '刪除項目時發生未預期的錯誤。' });
            }
+           console.error("刪除記錄項目時發生錯誤:", storageError);
       }
   };
 
@@ -605,8 +705,9 @@ export default function CalorieLogger() {
       // Ensure numeric fields are stored as numbers or null
       if (field === 'age' || field === 'height' || field === 'weight') {
           processedValue = value === '' ? null : Number(value);
-          if (isNaN(processedValue as number)) {
-              processedValue = null; // Handle invalid number input
+          if (isNaN(processedValue as number) || processedValue <= 0) { // Add check for non-positive numbers
+              processedValue = null; // Handle invalid or non-positive number input
+              toast({ variant: 'destructive', title: '無效輸入', description: `${field === 'age' ? '年齡' : field === 'height' ? '身高' : '體重'} 必須是正數。` });
           }
       }
       // Ensure activityLevel is one of the valid keys or null
@@ -618,7 +719,19 @@ export default function CalorieLogger() {
           processedValue = null;
       }
 
-      setUserProfile(prev => ({ ...prev, [field]: processedValue }));
+       try {
+         setUserProfile(prev => ({ ...prev, [field]: processedValue }));
+         // Clear error on successful update attempt (even if value is null)
+         // Note: useLocalStorage handles actual storage errors.
+       } catch (storageError: any) {
+           // This catch block might not be necessary if useLocalStorage handles all errors
+           if (storageError instanceof LocalStorageError) {
+               toast({ variant: 'destructive', title: '設定檔儲存錯誤', description: storageError.message });
+           } else {
+               toast({ variant: 'destructive', title: '設定檔儲存錯誤', description: '更新個人資料時發生未預期的錯誤。' });
+           }
+           console.error("儲存個人資料時發生錯誤:", storageError);
+       }
   };
 
   const bmr = useMemo(() => calculateBMR(userProfile), [userProfile]);
@@ -633,15 +746,16 @@ export default function CalorieLogger() {
     try {
        setWaterLog(prevLog => ({
            ...prevLog,
-           [today]: (prevLog[today] || 0) + amount,
+           [today]: Math.max(0, (prevLog[today] || 0) + amount), // Ensure water doesn't go below 0
        }));
        toast({ title: "已記錄飲水", description: `已新增 ${amount} 毫升。` });
-    } catch (storageError) {
+    } catch (storageError: any) {
         if (storageError instanceof LocalStorageError) {
             toast({ variant: 'destructive', title: '記錄錯誤', description: storageError.message });
         } else {
             toast({ variant: 'destructive', title: '記錄錯誤', description: '記錄飲水時發生未預期的錯誤。' });
         }
+         console.error("記錄飲水時發生錯誤:", storageError);
     }
   };
 
@@ -650,32 +764,43 @@ export default function CalorieLogger() {
       try {
          setWaterLog(prevLog => ({ ...prevLog, [today]: 0 }));
          toast({ title: "已重設", description: "今日飲水量已重設為 0。" });
-      } catch (storageError) {
+      } catch (storageError: any) {
           if (storageError instanceof LocalStorageError) {
             toast({ variant: 'destructive', title: '重設錯誤', description: storageError.message });
          } else {
             toast({ variant: 'destructive', title: '重設錯誤', description: '重設飲水時發生未預期的錯誤。' });
          }
+         console.error("重設飲水時發生錯誤:", storageError);
       }
   };
 
   const todayWaterIntake = waterLog[getCurrentDate()] || 0;
-  const waterProgress = recommendedWater ? Math.min((todayWaterIntake / recommendedWater) * 100, 100) : 0;
+  const waterProgress = recommendedWater ? Math.min((todayWaterIntake / (recommendedWater || 2000)) * 100, 100) : 0; // Use default target if recommended is null
   const defaultWaterTarget = 2000; // Default target if profile is incomplete
+
 
   // --- Rendering ---
 
   const renderLogEntry = (entry: CalorieLogEntry) => (
     <React.Fragment key={entry.id}>
-        <Card className="mb-4 overflow-hidden">
+        <Card className="mb-4 overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
             <CardHeader className="p-4">
                 <div className="flex items-start space-x-4">
-                    {/* Image Thumbnail */}
+                    {/* Image Thumbnail Button Triggering Modal */}
                     <DialogTrigger asChild>
                          <button
-                             className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
-                             onClick={(e) => { e.stopPropagation(); setShowImageModal(entry.imageUrl); }} // Prevent card toggle, open modal
-                             aria-label="放大圖片"
+                             className={cn(
+                                 "relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity",
+                                 !entry.imageUrl && "cursor-default hover:opacity-100" // Disable hover effect if no image
+                             )}
+                             onClick={(e) => {
+                                 if (entry.imageUrl) {
+                                     e.stopPropagation();
+                                     setShowImageModal(entry.imageUrl);
+                                 }
+                             }}
+                             aria-label={entry.imageUrl ? "放大圖片" : "無圖片"}
+                             disabled={!entry.imageUrl} // Disable button if no image
                          >
                             {entry.imageUrl ? (
                                 <img
@@ -683,6 +808,7 @@ export default function CalorieLogger() {
                                     alt={entry.foodItem}
                                     className="w-full h-full object-cover"
                                     data-ai-hint="logged food item"
+                                    loading="lazy" // Add lazy loading
                                 />
                             ) : (
                                 <UtensilsCrossed className="w-6 h-6 opacity-50" />
@@ -692,25 +818,36 @@ export default function CalorieLogger() {
 
                     {/* Main Info */}
                     <div className="flex-grow overflow-hidden">
-                       <CardTitle className="text-lg font-semibold leading-tight mb-1 truncate" title={entry.foodItem}>
+                       {/* Use a div for title to prevent implicit button nesting issues */}
+                       <div className="text-lg font-semibold leading-tight mb-1 truncate" title={entry.foodItem}>
                           {entry.foodItem}
-                       </CardTitle>
+                       </div>
                         <CardDescription className="text-sm text-muted-foreground">
                             約 {Math.round(entry.calorieEstimate)} 卡路里
-                            {entry.confidence !== undefined && entry.confidence < 0.7 && (
+                            {entry.confidence !== undefined && entry.confidence < 0.7 && entry.calorieEstimate > 0 && ( // Show confidence only if it's a food item with > 0 calories
                                 <span className="text-orange-600 ml-1 text-xs">(低信賴度)</span>
                             )}
                         </CardDescription>
-                         <div className="text-xs text-muted-foreground mt-1 flex items-center flex-wrap gap-x-2">
+                         <div className="text-xs text-muted-foreground mt-1 flex items-center flex-wrap gap-x-2 gap-y-1">
                              <span className="flex items-center"><Clock size={12} className="mr-1"/> {new Date(entry.timestamp).toLocaleString('zh-TW')}</span>
                              {entry.mealType && <span className="flex items-center"><UtensilsCrossed size={12} className="mr-1"/> {mealTypeTranslations[entry.mealType] || entry.mealType}</span>}
-                             {entry.location && <span className="flex items-center"><MapPin size={12} className="mr-1"/> {entry.location}</span>}
-                             {entry.cost !== null && <span className="flex items-center"><DollarSign size={12} className="mr-1"/> ${entry.cost.toFixed(2)}</span>}
+                             {entry.location && <span className="flex items-center"><MapPin size={12} className="mr-1"/> <span className="truncate" title={entry.location}>{entry.location}</span></span>}
+                             {entry.cost !== null && typeof entry.cost === 'number' && ( // Check type before toFixed
+                                <span className="flex items-center">
+                                    <DollarSign size={12} className="mr-1"/> ${entry.cost.toFixed(2)}
+                                </span>
+                             )}
                          </div>
+                          {/* Optional Notes Display */}
+                          {entry.notes && (
+                             <p className="text-xs text-muted-foreground mt-1 italic border-l-2 border-border pl-2">
+                                 {entry.notes}
+                             </p>
+                          )}
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex flex-col sm:flex-row gap-1 ml-auto">
+                    <div className="flex flex-col sm:flex-row items-center gap-1 ml-auto flex-shrink-0">
                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => startEditing(entry)} aria-label="編輯記錄">
                             <Edit size={16} />
                         </Button>
@@ -738,7 +875,6 @@ export default function CalorieLogger() {
                     </div>
                 </div>
             </CardHeader>
-             {/* Conditional Details (Removed, integrated above or in Edit) */}
         </Card>
     </React.Fragment>
  );
@@ -762,13 +898,22 @@ export default function CalorieLogger() {
             )}
             <div className="flex items-center justify-between">
                 <span className="font-medium text-foreground">偵測到的食物：</span>
-                <span className="text-muted-foreground">{estimation?.foodItem}</span>
+                <span className="text-muted-foreground">{estimation?.foodItem ?? '讀取中...'}</span>
             </div>
+            {/* Editable Calorie Estimate */}
             <div className="flex items-center justify-between">
-                <span className="font-medium text-foreground">估計卡路里：</span>
-                <span className="font-semibold text-primary">
-                    {estimation?.isFoodItem ? Math.round(estimation?.calorieEstimate ?? 0) : 0} 卡
-                 </span>
+                 <Label htmlFor="est-calories" className="font-medium text-foreground flex items-center">
+                     <Edit size={12} className="mr-1 opacity-70"/> 估計卡路里：
+                 </Label>
+                  <Input
+                     id="est-calories"
+                     type="number"
+                     value={estimation?.calorieEstimate ?? ''}
+                     onChange={(e) => handleEstimationCalorieChange(e.target.value)}
+                     className="font-semibold text-primary h-8 w-24 text-right"
+                     aria-label="編輯估計卡路里"
+                     disabled={estimation === null} // Disable if no estimation yet
+                 />
             </div>
              {estimation?.isFoodItem && estimation?.confidence !== undefined && (
                  <div className="flex items-center justify-between">
@@ -781,7 +926,7 @@ export default function CalorieLogger() {
 
              <div className="flex items-center justify-center mt-4 relative w-full aspect-video rounded-md overflow-hidden border bg-muted">
                   {imageSrc ? (
-                     <img src={imageSrc} alt="Captured food" className="object-contain max-h-full max-w-full" />
+                     <img src={imageSrc} alt="拍攝的食物" className="object-contain max-h-full max-w-full" />
                    ) : (
                      <UtensilsCrossed className="w-12 h-12 text-muted-foreground opacity-50" />
                    )}
@@ -792,7 +937,7 @@ export default function CalorieLogger() {
              <Button variant="outline" onClick={() => { setImageSrc(null); setEstimation(null); setError(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
                  清除
              </Button>
-             <Button onClick={logCalories} variant="default"> {/* Use default variant for primary action */}
+             <Button onClick={logCalories} variant="default" disabled={!imageSrc}> {/* Disable if no image */}
                  <Plus className="mr-2 h-4 w-4" /> 記錄卡路里
              </Button>
         </CardFooter>
@@ -807,31 +952,67 @@ export default function CalorieLogger() {
       setIsClient(true);
     }, []);
 
+     // Check for localStorage errors and display a persistent warning if needed
+     const renderStorageError = () => {
+        const errorMessages = [
+            logError,
+            profileError,
+            waterLogError,
+            notificationSettingsError
+        ].filter(Boolean); // Filter out null errors
+
+         if (errorMessages.length === 0) return null;
+
+         // Display the first error encountered
+         const firstError = errorMessages[0];
+         let title = '儲存空間錯誤';
+         if (firstError === profileError) title = '設定檔儲存錯誤';
+         else if (firstError === waterLogError) title = '飲水記錄儲存錯誤';
+         else if (firstError === notificationSettingsError) title = '通知設定儲存錯誤';
+
+         return (
+             <Alert variant="destructive" className="my-4">
+                 <Info className="h-4 w-4" />
+                 <AlertTitle>{title}</AlertTitle>
+                 <AlertDescription>{firstError?.message || '處理資料時發生錯誤。儲存空間可能已滿。'}</AlertDescription>
+             </Alert>
+         );
+     };
+
+
     if (!isClient) {
         // Render placeholder or loading state on the server
         return (
-            <div className="space-y-4">
-                {[...Array(3)].map((_, i) => (
-                     <Card key={i} className="mb-4 opacity-50">
-                        <CardHeader className="p-4">
-                            <div className="flex items-start space-x-4">
-                                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-md bg-muted border flex-shrink-0"></div>
-                                <div className="flex-grow space-y-2">
-                                    <div className="h-4 bg-muted rounded w-3/4"></div>
-                                    <div className="h-3 bg-muted rounded w-1/2"></div>
-                                    <div className="h-3 bg-muted rounded w-5/6"></div>
+             <div className="mt-6">
+                <h2 className="text-2xl font-semibold mb-4 text-primary">卡路里記錄摘要</h2>
+                <div className="space-y-4">
+                    {[...Array(3)].map((_, i) => (
+                         <Card key={i} className="mb-4 opacity-50 animate-pulse">
+                            <CardHeader className="p-4">
+                                <div className="flex items-start space-x-4">
+                                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-md bg-muted border flex-shrink-0"></div>
+                                    <div className="flex-grow space-y-2">
+                                        <div className="h-4 bg-muted rounded w-3/4"></div>
+                                        <div className="h-3 bg-muted rounded w-1/2"></div>
+                                        <div className="h-3 bg-muted rounded w-5/6"></div>
+                                    </div>
+                                     <div className="flex flex-col sm:flex-row items-center gap-1 ml-auto flex-shrink-0">
+                                         <div className="h-8 w-8 bg-muted rounded"></div>
+                                         <div className="h-8 w-8 bg-muted rounded"></div>
+                                     </div>
                                 </div>
-                            </div>
-                        </CardHeader>
-                    </Card>
-                ))}
+                            </CardHeader>
+                        </Card>
+                    ))}
+                </div>
             </div>
         );
     }
 
     if (calorieLog.length === 0) {
       return (
-        <div className="text-center text-muted-foreground py-10">
+        <div className="text-center text-muted-foreground py-10 mt-6">
+           {renderStorageError()}
           <UtensilsCrossed className="mx-auto h-12 w-12 opacity-50 mb-4" />
           <p>尚未記錄任何卡路里。</p>
           <p>使用上方的相機或上傳按鈕開始記錄！</p>
@@ -841,6 +1022,7 @@ export default function CalorieLogger() {
 
     // Group by date
     const groupedLog = calorieLog.reduce((acc, entry) => {
+      if (!entry || !entry.timestamp) return acc; // Skip invalid entries
       const date = new Date(entry.timestamp).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
       if (!acc[date]) {
         acc[date] = [];
@@ -849,47 +1031,6 @@ export default function CalorieLogger() {
       return acc;
     }, {} as Record<string, CalorieLogEntry[]>);
 
-
-     // Check for localStorage errors and display a persistent warning if needed
-     const renderStorageError = () => {
-         if (logError) {
-             return (
-                 <Alert variant="destructive" className="mb-4">
-                     <Info className="h-4 w-4" />
-                     <AlertTitle>儲存空間錯誤</AlertTitle>
-                     <AlertDescription>{logError.message || '無法儲存新記錄，您的瀏覽器儲存空間可能已滿。請嘗試刪除一些舊記錄。'}</AlertDescription>
-                 </Alert>
-             );
-         }
-          if (profileError) {
-             return (
-                 <Alert variant="destructive" className="mb-4">
-                     <Info className="h-4 w-4" />
-                     <AlertTitle>設定檔儲存錯誤</AlertTitle>
-                     <AlertDescription>{profileError.message || '無法儲存個人資料變更。儲存空間可能已滿。'}</AlertDescription>
-                 </Alert>
-             );
-         }
-          if (waterLogError) {
-             return (
-                 <Alert variant="destructive" className="mb-4">
-                     <Info className="h-4 w-4" />
-                     <AlertTitle>飲水記錄儲存錯誤</AlertTitle>
-                     <AlertDescription>{waterLogError.message || '無法儲存飲水記錄變更。儲存空間可能已滿。'}</AlertDescription>
-                 </Alert>
-             );
-         }
-          if (notificationSettingsError) {
-             return (
-                 <Alert variant="destructive" className="mb-4">
-                     <Info className="h-4 w-4" />
-                     <AlertTitle>通知設定儲存錯誤</AlertTitle>
-                     <AlertDescription>{notificationSettingsError.message || '無法儲存通知設定。儲存空間可能已滿。'}</AlertDescription>
-                 </Alert>
-             );
-         }
-         return null;
-     };
 
     return (
         <div className="mt-6">
@@ -915,8 +1056,8 @@ export default function CalorieLogger() {
                 <Droplet size={24} className="text-blue-500" /> 每日飲水追蹤
             </CardTitle>
              <CardDescription>
-                 建議飲水量：{recommendedWater ? `${recommendedWater} 毫升` : '請完成個人資料'}
-                 {userProfile.weight && <span className="text-xs"> (基於 {userProfile.weight} 公斤體重)</span>}
+                  建議飲水量：{recommendedWater ? `${recommendedWater} 毫升` : '請完成個人資料'} (約 {(recommendedWater || defaultWaterTarget) / 250} 杯)。
+                  {userProfile.weight && <span className="text-xs"> (基於 {userProfile.weight} 公斤體重)</span>}
              </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -931,13 +1072,16 @@ export default function CalorieLogger() {
                 <Button onClick={() => addWater(500)} variant="outline" size="sm">
                     <Plus className="mr-1 h-4 w-4" /> 500ml (一瓶)
                 </Button>
+                 <Button onClick={() => addWater(-250)} variant="outline" size="sm" disabled={todayWaterIntake <= 0}>
+                     <Trash2 className="mr-1 h-4 w-4" /> 移除 250ml
+                 </Button>
                 <Button onClick={resetWater} variant="destructive" size="sm">
                     <RotateCw className="mr-1 h-4 w-4" /> 重設今日
                 </Button>
             </div>
         </CardContent>
         <CardFooter className="text-xs text-muted-foreground">
-            保持水分充足對健康至關重要！
+            保持水分充足對健康至關重要！成人每日建議飲水 8 杯 (約 2000 毫升)。
         </CardFooter>
     </Card>
 );
@@ -972,9 +1116,9 @@ export default function CalorieLogger() {
                  <span className="text-muted-foreground">{userProfile.weight ? `${userProfile.weight} 公斤` : '未設定'}</span>
 
                  <span className="font-medium text-foreground">活動水平：</span>
-                 <span className="text-muted-foreground truncate" title={userProfile.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : '未設定'}>
-                     {userProfile.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : '未設定'}
-                 </span>
+                  <span className="text-muted-foreground truncate" title={userProfile.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : '未設定'}>
+                      {userProfile.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : '未設定'}
+                  </span>
              </div>
              <hr className="my-3 border-border" />
              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
@@ -998,7 +1142,7 @@ export default function CalorieLogger() {
               </div>
         </CardContent>
         <CardFooter className="text-xs text-muted-foreground">
-             基礎代謝率 (BMR) 是您身體在休息時燃燒的卡路里數量。
+             基礎代謝率 (BMR) 是您身體在休息時燃燒的卡路里數量。BMI 是體重指數。
         </CardFooter>
     </Card>
 );
@@ -1006,7 +1150,7 @@ export default function CalorieLogger() {
 
   const renderEditDialog = () => (
      <Dialog open={isEditing} onOpenChange={setIsEditing}>
-         <DialogContent>
+         <DialogContent className="max-h-[90vh] overflow-y-auto">
              <DialogHeader>
                  <DialogTitle>編輯記錄項目</DialogTitle>
                  <DialogDescription>
@@ -1036,8 +1180,9 @@ export default function CalorieLogger() {
                              id="edit-calorieEstimate"
                              type="number"
                              value={editingEntry.calorieEstimate}
-                             onChange={(e) => handleEditChange('calorieEstimate', parseInt(e.target.value) || 0)}
+                             onChange={(e) => handleEditChange('calorieEstimate', e.target.value)}
                              className="col-span-3"
+                             min="0" // Ensure calories are not negative
                          />
                      </div>
                      {/* Timestamp */}
@@ -1048,14 +1193,10 @@ export default function CalorieLogger() {
                          <Input
                              id="edit-timestamp"
                              type="datetime-local" // Use datetime-local for date and time
-                             value={editingEntry.timestamp ? editingEntry.timestamp.substring(0, 16) : ''} // Format for input
-                             onChange={(e) => {
-                                 const date = new Date(e.target.value);
-                                 if (isValidDate(date)) {
-                                     handleEditChange('timestamp', date.toISOString());
-                                 }
-                             }}
+                             value={editingEntry.timestamp ? editingEntry.timestamp.substring(0, 16) : ''} // Format for input YYYY-MM-DDTHH:mm
+                             onChange={(e) => handleEditChange('timestamp', e.target.value)}
                              className="col-span-3"
+                             max={new Date().toISOString().substring(0, 16)} // Prevent selecting future dates/times
                          />
                      </div>
                       {/* Meal Type */}
@@ -1065,12 +1206,13 @@ export default function CalorieLogger() {
                          </Label>
                           <Select
                              value={editingEntry.mealType || ''}
-                             onValueChange={(value) => handleEditChange('mealType', value || null)}
+                             onValueChange={(value) => handleEditChange('mealType', value)} // Pass value directly
                          >
                              <SelectTrigger id="edit-mealType" className="col-span-3">
-                                 <SelectValue placeholder="選擇餐別" />
+                                 <SelectValue placeholder="選擇餐別 (選填)" />
                              </SelectTrigger>
                              <SelectContent>
+                                  <SelectItem value="">-- 無 --</SelectItem> {/* Option for null */}
                                  <SelectItem value="Breakfast">{mealTypeTranslations['Breakfast']}</SelectItem>
                                  <SelectItem value="Lunch">{mealTypeTranslations['Lunch']}</SelectItem>
                                  <SelectItem value="Dinner">{mealTypeTranslations['Dinner']}</SelectItem>
@@ -1088,7 +1230,7 @@ export default function CalorieLogger() {
                              value={editingEntry.location || ''}
                              onChange={(e) => handleEditChange('location', e.target.value)}
                              className="col-span-3"
-                             placeholder="例如：家裡、餐廳名稱"
+                             placeholder="例如：家裡、餐廳名稱 (選填)"
                          />
                      </div>
                      {/* Cost */}
@@ -1100,8 +1242,9 @@ export default function CalorieLogger() {
                              id="edit-cost"
                              type="number"
                              step="0.01"
-                             value={editingEntry.cost === null ? '' : editingEntry.cost}
-                             onChange={(e) => handleEditChange('cost', e.target.value === '' ? null : parseFloat(e.target.value) || null)}
+                             min="0" // Cost cannot be negative
+                             value={editingEntry.cost === null ? '' : editingEntry.cost.toString()} // Ensure value is string for input
+                             onChange={(e) => handleEditChange('cost', e.target.value)}
                              className="col-span-3"
                              placeholder="輸入金額 (選填)"
                          />
@@ -1117,6 +1260,7 @@ export default function CalorieLogger() {
                              onChange={(e) => handleEditChange('notes', e.target.value)}
                              className="col-span-3"
                              placeholder="新增備註 (選填)"
+                             rows={3}
                          />
                      </div>
                  </div>
@@ -1135,10 +1279,11 @@ export default function CalorieLogger() {
     <Dialog open={!!showImageModal} onOpenChange={() => setShowImageModal(null)}>
         <DialogContent className="max-w-3xl p-2">
              {showImageModal && (
+                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={showImageModal} alt="放大檢視" className="max-w-full max-h-[80vh] object-contain rounded-md" />
              )}
              <DialogClose asChild>
-                  <Button variant="ghost" size="icon" className="absolute top-3 right-3 h-7 w-7" aria-label="關閉">
+                  <Button variant="ghost" size="icon" className="absolute top-3 right-3 h-7 w-7 bg-background/50 hover:bg-background/80 rounded-full" aria-label="關閉">
                      <X size={18}/>
                   </Button>
              </DialogClose>
@@ -1153,30 +1298,43 @@ export default function CalorieLogger() {
         <DialogHeader>
           <DialogTitle>裁切影像</DialogTitle>
           <DialogDescription>
-            拖曳選框以裁切您的食物照片。
+            拖曳選框以裁切您的食物照片。留空以使用完整圖片。
           </DialogDescription>
         </DialogHeader>
         {imageSrc && (
-            <ReactCrop
-                crop={crop}
-                onChange={(_, percentCrop) => setCrop(percentCrop)}
-                onComplete={(c) => setCompletedCrop(c)}
-                aspect={aspect} // Keep aspect ratio if needed, or remove for free crop
-                className="max-h-[60vh]" // Limit height
-            >
-             <img
-                 ref={imgRef}
-                 alt="裁切預覽"
-                 src={imageSrc}
-                 style={{ transform: `scale(1) rotate(0deg)` }} // Basic styles, add rotation/scale if needed
-                 onLoad={onImageLoad}
-                 className="max-h-[55vh] object-contain" // Ensure image fits
-             />
-            </ReactCrop>
+             <div className="my-4 flex justify-center max-h-[60vh] overflow-auto">
+                <ReactCrop
+                    crop={crop}
+                    onChange={(_, percentCrop) => setCrop(percentCrop)}
+                    onComplete={(c) => setCompletedCrop(c)}
+                    aspect={aspect} // Use undefined for free crop
+                    // minWidth={50} // Optional: Minimum crop size
+                    // minHeight={50}
+                    // ruleOfThirds // Optional: Show rule of thirds grid
+                    // circularCrop // Optional: If you want a circular crop
+                >
+                 <img
+                     ref={imgRef}
+                     alt="裁切預覽"
+                     src={imageSrc}
+                     style={{ transform: `scale(1) rotate(0deg)` }} // Basic styles, add rotation/scale if needed
+                     onLoad={onImageLoad}
+                     className="max-h-full max-w-full object-contain" // Ensure image fits container
+                 />
+                </ReactCrop>
+            </div>
         )}
-        <DialogFooter>
-           <Button variant="outline" onClick={() => setIsCropping(false)}>取消</Button>
-           <Button onClick={handleCropConfirm}>確認裁切</Button>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+            {/* Button to toggle aspect ratio */}
+            {/* <Button
+                variant="outline"
+                onClick={() => setAspect(aspect ? undefined : 1)}
+                className="w-full sm:w-auto"
+            >
+                {aspect ? "自由裁切" : "鎖定比例 (1:1)"}
+            </Button> */}
+           <Button variant="outline" onClick={() => setIsCropping(false)} className="w-full sm:w-auto">取消</Button>
+           <Button onClick={handleCropConfirm} className="w-full sm:w-auto">確認裁切</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1208,6 +1366,7 @@ export default function CalorieLogger() {
                          placeholder="輸入您的年齡"
                          value={userProfile.age === null ? '' : userProfile.age}
                          onChange={(e) => handleProfileChange('age', e.target.value)}
+                         min="1" // Minimum age 1
                      />
                  </div>
                  {/* Gender */}
@@ -1215,12 +1374,13 @@ export default function CalorieLogger() {
                      <Label htmlFor="gender">生理性別</Label>
                       <Select
                          value={userProfile.gender || ''}
-                         onValueChange={(value) => handleProfileChange('gender', value || null)}
+                         onValueChange={(value) => handleProfileChange('gender', value)}
                       >
                          <SelectTrigger id="gender" aria-label="選取生理性別">
                              <SelectValue placeholder="選取生理性別" />
                          </SelectTrigger>
                          <SelectContent>
+                             <SelectItem value="">-- 未設定 --</SelectItem>
                              <SelectItem value="male">男性</SelectItem>
                              <SelectItem value="female">女性</SelectItem>
                              <SelectItem value="other">其他</SelectItem>
@@ -1236,6 +1396,7 @@ export default function CalorieLogger() {
                          placeholder="輸入您的身高 (公分)"
                          value={userProfile.height === null ? '' : userProfile.height}
                          onChange={(e) => handleProfileChange('height', e.target.value)}
+                          min="1" // Minimum height 1cm
                      />
                  </div>
                   {/* Weight */}
@@ -1247,6 +1408,8 @@ export default function CalorieLogger() {
                          placeholder="輸入您的體重 (公斤)"
                          value={userProfile.weight === null ? '' : userProfile.weight}
                          onChange={(e) => handleProfileChange('weight', e.target.value)}
+                         min="1" // Minimum weight 1kg
+                         step="0.1" // Allow decimal for weight
                      />
                  </div>
                  {/* Activity Level */}
@@ -1254,12 +1417,13 @@ export default function CalorieLogger() {
                      <Label htmlFor="activityLevel">活動水平</Label>
                      <Select
                          value={userProfile.activityLevel || ''}
-                         onValueChange={(value) => handleProfileChange('activityLevel', value || null)}
+                         onValueChange={(value) => handleProfileChange('activityLevel', value)}
                      >
                          <SelectTrigger id="activityLevel" aria-label="選取活動水平">
                              <SelectValue placeholder="選取您的活動水平" />
                          </SelectTrigger>
                          <SelectContent>
+                              <SelectItem value="">-- 未設定 --</SelectItem>
                              {Object.entries(activityLevelTranslations).map(([key, label]) => (
                                 <SelectItem key={key} value={key}>{label}</SelectItem>
                              ))}
@@ -1290,58 +1454,68 @@ export default function CalorieLogger() {
 
 
   return (
-    <Dialog> {/* Wrap relevant parts or the whole component for modals */}
+    <Dialog> {/* Main Dialog wrapper for modals */}
         <Tabs defaultValue="logging" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
-                 <TabsTrigger value="logging">
-                     <Camera className="mr-1 sm:mr-2 h-4 w-4" />
-                     <span className="truncate">拍照 & 摘要</span>
+             <TabsList className="grid w-full grid-cols-3 sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
+                 <TabsTrigger value="logging" className="flex-1 text-center px-1">
+                     <Camera className="mr-1 sm:mr-2 h-4 w-4 inline-block" />
+                     <span className="truncate hidden sm:inline">拍照記錄 & 摘要</span>
+                     <span className="truncate sm:hidden">記錄</span>
                  </TabsTrigger>
-                 <TabsTrigger value="tracking">
-                     <Droplet className="mr-1 sm:mr-2 h-4 w-4" />
-                     <span className="truncate">飲水 & 資料</span>
+                 <TabsTrigger value="tracking" className="flex-1 text-center px-1">
+                     <Droplet className="mr-1 sm:mr-2 h-4 w-4 inline-block" />
+                     <span className="truncate hidden sm:inline">飲水 & 資料</span>
+                     <span className="truncate sm:hidden">資料</span>
                  </TabsTrigger>
-                 <TabsTrigger value="settings">
-                     <Settings className="mr-1 sm:mr-2 h-4 w-4" />
-                     <span className="truncate">設定</span>
+                 <TabsTrigger value="settings" className="flex-1 text-center px-1">
+                     <Settings className="mr-1 sm:mr-2 h-4 w-4 inline-block" />
+                     <span className="truncate hidden sm:inline">設定</span>
+                     <span className="truncate sm:hidden">設定</span>
                  </TabsTrigger>
             </TabsList>
 
              {/* Tab 1: Logging & Summary */}
-            <TabsContent value="logging">
+            <TabsContent value="logging" className="pt-4">
                  <Card className="mb-6 shadow-md">
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2"><Camera size={24} /> 拍攝或上傳食物照片</CardTitle>
                         <CardDescription>使用您的相機拍攝食物照片，或從您的裝置上傳影像。</CardDescription>
                     </CardHeader>
                     <CardContent>
+                        {/* Camera Preview */}
                         <div className="relative aspect-video w-full rounded-md overflow-hidden border bg-muted mb-4">
                             <video
                                 ref={videoRef}
-                                className={`w-full h-full object-cover ${hasCameraPermission === false ? 'hidden' : ''}`}
+                                className={cn(
+                                    "w-full h-full object-cover transition-opacity duration-300",
+                                    hasCameraPermission === false ? 'opacity-0 pointer-events-none' : 'opacity-100'
+                                )}
                                 autoPlay
                                 muted
                                 playsInline // Important for mobile
+                                // Consider adding poster attribute for initial state
                             />
+                             {/* Loading State */}
                              {hasCameraPermission === null && (
-                                <div className="absolute inset-0 flex items-center justify-center">
+                                <div className="absolute inset-0 flex items-center justify-center bg-muted">
                                     <LoadingSpinner />
                                 </div>
                             )}
+                             {/* No Permission State */}
                             {hasCameraPermission === false && (
-                                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
+                                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 bg-muted">
                                      <Camera size={48} className="text-muted-foreground opacity-50 mb-2" />
                                      <p className="text-muted-foreground">相機無法使用或權限遭拒。</p>
                                      <p className="text-xs text-muted-foreground mt-1">請允許相機存取或使用上傳按鈕。</p>
+                                      {/* Optionally add a button to re-request permission if needed */}
+                                     {/* <Button onClick={getCameraPermission} variant="outline" size="sm" className="mt-2">重試</Button> */}
                                  </div>
                             )}
-                             {/* Display Captured/Uploaded Image for Cropping */}
-                             {/* This section is now handled by the crop dialog */}
                         </div>
 
                         {/* Capture/Upload Buttons */}
                         <div className="flex flex-col sm:flex-row gap-2">
-                             <Button onClick={captureImage} disabled={!hasCameraPermission || isLoading} className="flex-1">
+                             <Button onClick={captureImage} disabled={hasCameraPermission !== true || isLoading} className="flex-1">
                                  <Camera className="mr-2 h-4 w-4" /> 拍攝照片
                              </Button>
                             <Button onClick={() => fileInputRef.current?.click()} disabled={isLoading} variant="outline" className="flex-1">
@@ -1351,8 +1525,9 @@ export default function CalorieLogger() {
                                 type="file"
                                 ref={fileInputRef}
                                 onChange={uploadImage}
-                                accept="image/*"
+                                accept="image/*" // Specify image types
                                 className="hidden"
+                                aria-hidden="true" // Hide from accessibility tree
                             />
                         </div>
 
@@ -1372,30 +1547,32 @@ export default function CalorieLogger() {
                     </CardContent>
                 </Card>
 
-                {estimation && imageSrc && !isCropping && renderEstimationResult()}
+                 {/* Estimation Result (only show if imageSrc exists and not cropping) */}
+                 {imageSrc && !isCropping && renderEstimationResult()}
+
+                 {/* Calorie Log Summary */}
                 {renderLogList()}
 
             </TabsContent>
 
              {/* Tab 2: Water Tracking & Profile Stats */}
-            <TabsContent value="tracking">
+            <TabsContent value="tracking" className="pt-4">
                 {renderWaterTracker()}
                 {renderProfileStats()}
             </TabsContent>
 
              {/* Tab 3: Settings */}
-             <TabsContent value="settings">
+             <TabsContent value="settings" className="pt-4">
                  {renderProfileEditor()}
                  {renderNotificationSettingsTrigger()}
-                 {/* Add other settings components here */}
+                 {/* Add other settings components here if needed */}
              </TabsContent>
         </Tabs>
 
+        {/* Render Modals outside TabsContent for proper stacking */}
         {renderEditDialog()}
         {renderImageModal()}
         {renderCropDialog()}
     </Dialog>
   );
 }
-
-    
