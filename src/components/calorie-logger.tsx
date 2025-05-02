@@ -790,23 +790,31 @@ export default function CalorieLogger() {
       };
 
       // Log the entry using the setCalorieLog setter which handles errors
-      try {
-          // Limit the log size (e.g., keep only the latest 100 entries)
-          const MAX_LOG_ENTRIES = 100; // Keep this relatively low due to image data size
-          setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
+      // Error handling is now done within the custom hook via the error state
+      // No need for try-catch here, just call the setter.
+      // Limit the log size (e.g., keep only the latest 100 entries)
+      const MAX_LOG_ENTRIES = 100; // Keep this relatively low due to image data size
+      setCalorieLog(prevLog => [newLogEntry, ...prevLog].slice(0, MAX_LOG_ENTRIES));
 
-          // Clear the current image and results/fields after potentially successful logging
-          clearAll(); // Use the clearAll function
-          toast({
-              title: "記錄成功",
-              description: `${newLogEntry.foodItem} (${newLogEntry.calorieEstimate} 大卡) 已新增至您的記錄中。`,
-          });
-      } catch (e) {
-            // Errors are now caught and displayed via the useEffect hook watching storageError
-            // No need to repeat toast logic here, but keep console.error for debugging.
-           console.error("Saving to localStorage failed:", e);
-           // The useEffect hook will show the toast based on storageError state.
+      // If no storage error occurred after setting the state, proceed with UI updates.
+      // Check storageError state immediately after the potential update (although it might be slightly delayed)
+      // A better approach might be to check it in the useEffect that watches storageError,
+      // but for immediate feedback, we can try this.
+      // Note: This direct check might not catch the error immediately if state updates are async.
+      // The useEffect hook is the more reliable way to react to the error.
+      if (!storageError) {
+        // Clear the current image and results/fields after potentially successful logging
+        clearAll(); // Use the clearAll function
+        toast({
+            title: "記錄成功",
+            description: `${newLogEntry.foodItem} (${newLogEntry.calorieEstimate} 大卡) 已新增至您的記錄中。`,
+        });
+      } else {
+         // Error is already handled by the useEffect hook watching storageError,
+         // which will display the toast. No need to display another toast here.
+         console.error("Saving to localStorage failed (detected immediately):", storageError);
       }
+
 
     } else {
          let errorDesc = "沒有可記錄的估計結果或影像。";
@@ -823,25 +831,19 @@ export default function CalorieLogger() {
 
 
   const deleteLogEntry = (id: string) => {
-    try {
-        setCalorieLog(calorieLog.filter(entry => entry.id !== id));
+    // Error handling is now done within the custom hook via the error state
+    // No need for try-catch here, just call the setter.
+    setCalorieLog(calorieLog.filter(entry => entry.id !== id));
+
+    // Check storageError after update (similar caveat as in logCalories)
+    if (!storageError) {
         toast({
             title: "記錄項目已刪除",
             description: "所選項目已從您的記錄中移除。",
         });
-    } catch (e) {
-        console.error("刪除記錄項目時發生錯誤:", e);
-        // Errors are now caught and displayed via the useEffect hook watching storageError
-        // No need to repeat toast logic here.
-        // if (e instanceof LocalStorageError) {
-        //      toast({ title: "刪除錯誤", description: e.message, variant: "destructive" });
-        // } else {
-        //     toast({
-        //         title: "刪除錯誤",
-        //         description: `移除項目時發生錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`,
-        //         variant: "destructive",
-        //     });
-        // }
+    } else {
+        console.error("Deleting from localStorage failed (detected immediately):", storageError);
+        // Toast is handled by the useEffect hook watching storageError
     }
 };
 
@@ -920,59 +922,66 @@ export default function CalorieLogger() {
      }
 
 
-    try {
-        setCalorieLog(prevLog =>
-            prevLog.map(entry =>
-                entry.id === id
-                    ? {
-                        ...entry, // Keep original confidence, id, imageUrl
-                        foodItem: editedEntryData.foodItem!.trim(),
-                        calorieEstimate: editedCalories, // Already validated number
-                        timestamp: editedTimestamp, // Use parsed timestamp
-                        location: editedEntryData.location || undefined, // Handle empty string for location
-                        mealType: editedEntryData.mealType,
-                        amount: editedAmount, // Already validated number or undefined
-                      }
-                    : entry
-            )
-        );
+    // Error handling is now done within the custom hook via the error state
+    // No need for try-catch here, just call the setter.
+    setCalorieLog(prevLog =>
+        prevLog.map(entry =>
+            entry.id === id
+                ? {
+                    ...entry, // Keep original confidence, id, imageUrl
+                    foodItem: editedEntryData.foodItem!.trim(),
+                    calorieEstimate: editedCalories, // Already validated number
+                    timestamp: editedTimestamp, // Use parsed timestamp
+                    location: editedEntryData.location || undefined, // Handle empty string for location
+                    mealType: editedEntryData.mealType,
+                    amount: editedAmount, // Already validated number or undefined
+                  }
+                : entry
+        )
+    );
+
+     // Check storageError after update (similar caveat as in logCalories)
+     if (!storageError) {
         cancelEditing(); // Exit edit mode
         toast({
             title: "記錄已更新",
             description: "項目已成功更新。",
         });
-    } catch (e) {
-        console.error("儲存編輯後的項目時發生錯誤:", e);
-        // Errors are now caught and displayed via the useEffect hook watching storageError
-        // No need to repeat toast logic here.
-        // if (e instanceof LocalStorageError && (e.message.includes('quota exceeded') || e.message.includes('Failed to execute \'setItem\''))) {
-        //      toast({
-        //         title: "更新錯誤",
-        //         description: "無法更新此項目。瀏覽器儲存空間可能已滿。",
-        //         variant: "destructive",
-        //         duration: 7000,
-        //     });
-        // } else {
-        //     toast({ title: "更新錯誤", description: `儲存變更時發生未預期的錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`, variant: "destructive" });
-        // }
-    }
+     } else {
+         console.error("Saving edited entry to localStorage failed (detected immediately):", storageError);
+         // Toast is handled by the useEffect hook watching storageError
+     }
+
   };
   // --- End Edit Entry Functions ---
 
   // Handlers for User Profile Input
-  const handleProfileChange = (field: keyof UserProfile, value: string | number | ActivityLevel | undefined) => {
+ const handleProfileChange = (field: keyof UserProfile, value: string | number | ActivityLevel | undefined) => {
     setUserProfile(prev => {
         const newProfile = { ...prev };
+        let processedValue: number | ActivityLevel | undefined;
+
         if (field === 'height' || field === 'weight') {
             const numValue = value === '' ? undefined : parseFloat(value as string);
-            newProfile[field] = numValue !== undefined && !isNaN(numValue) && numValue >= 0 ? numValue : undefined;
+            processedValue = numValue !== undefined && !isNaN(numValue) && numValue >= 0 ? numValue : undefined;
         } else if (field === 'activityLevel') {
-            newProfile[field] = value as ActivityLevel | undefined;
+            processedValue = value as ActivityLevel | undefined;
+        } else {
+             // Should not happen with current fields, but good practice
+             return prev;
         }
-        // setUserProfile now handles try-catch internally
-        return newProfile;
+
+        // Only update if the value has actually changed
+        if (newProfile[field] !== processedValue) {
+            newProfile[field] = processedValue;
+            // The setUserProfile hook now handles try-catch internally and sets profileStorageError
+             return newProfile; // Return the updated profile for the hook to process
+        }
+
+        return prev; // Return previous state if no change
     });
  };
+
 
   const estimatedDailyNeeds = useMemo(() => calculateEstimatedNeeds(userProfile), [userProfile]);
 
