@@ -1,8 +1,10 @@
 
+
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Image from 'next/image';
+// Import the updated types including isFoodItem
 import { estimateCalorieCount, type EstimateCalorieCountOutput } from '@/ai/flows/estimate-calorie-count';
 import useLocalStorage, { LocalStorageError } from '@/hooks/use-local-storage'; // Import LocalStorageError
 import { Button } from '@/components/ui/button';
@@ -24,6 +26,7 @@ import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for plac
 import { format, startOfDay, parseISO, isValid, isDate } from 'date-fns'; // Import date-fns functions, add isValid, isDate
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"; // Import Alert
 import { Progress } from "@/components/ui/progress"; // Import Progress component
+import { isValidDate } from '@/lib/utils'; // Import utility function
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -59,6 +62,7 @@ const genderTranslations: Record<Gender, string> = {
 
 
 // Interface for the data stored in localStorage - includes editable fields
+// Added isFoodItem from the AI output
 interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem' | 'calorieEstimate'> {
   id: string;
   timestamp: number; // Editable timestamp (epoch ms)
@@ -68,6 +72,7 @@ interface LogEntryStorage extends Omit<EstimateCalorieCountOutput, 'foodItem' | 
   location?: string; // Optional location
   mealType?: MealType; // Meal type
   amount?: number; // Optional amount/cost
+  // isFoodItem is already included from EstimateCalorieCountOutput
 }
 
 // User Profile Interface
@@ -254,7 +259,7 @@ const formatDateTimeLocal = (timestamp: number): string => {
   if (!timestamp || typeof timestamp !== 'number') return '';
   try {
     const date = new Date(timestamp);
-    if (!isValid(date)) return ''; // Check if date is valid
+    if (!isValidDate(date)) return ''; // Use utility function
     // Format: YYYY-MM-DDTHH:mm (seconds are usually not needed for this input)
     const year = date.getFullYear();
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -273,7 +278,7 @@ const parseDateTimeLocal = (dateTimeString: string): number | null => {
   if (!dateTimeString) return null;
   try {
     const date = new Date(dateTimeString);
-    if (!isValid(date)) return null; // Check if parsed date is valid
+    if (!isValidDate(date)) return null; // Use utility function
     return date.getTime();
   } catch (e) {
     console.error("Error parsing date/time string:", e);
@@ -285,6 +290,7 @@ const parseDateTimeLocal = (dateTimeString: string): number | null => {
 export default function CalorieLogger() {
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null); // For cropper
   const [imageSrc, setImageSrc] = useState<string | null>(null); // For preview after crop/compress AND storing
+  // Use the storage-specific type for estimation result state
   const [estimationResult, setEstimationResult] = useState<EstimateCalorieCountOutput | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState<string>(''); // For specific loading messages
@@ -343,7 +349,8 @@ export default function CalorieLogger() {
      if (storageError instanceof LocalStorageError) {
         toast({
             title: "記錄儲存錯誤",
-            description: storageError.message, // Use the user-friendly message from the hook
+            // Use the user-friendly message from the hook
+            description: storageError.message || "儲存卡路里記錄時發生未知的錯誤。",
             variant: "destructive",
             duration: 9000, // Show longer
         });
@@ -353,7 +360,8 @@ export default function CalorieLogger() {
      if (profileStorageError instanceof LocalStorageError) {
         toast({
             title: "個人資料儲存錯誤",
-            description: profileStorageError.message, // Use the user-friendly message from the hook
+            // Use the user-friendly message from the hook
+            description: profileStorageError.message || "儲存個人資料時發生未知的錯誤。",
             variant: "destructive",
             duration: 7000,
         });
@@ -361,7 +369,7 @@ export default function CalorieLogger() {
       if (waterStorageError instanceof LocalStorageError) {
         toast({
             title: "飲水記錄儲存錯誤",
-            description: waterStorageError.message,
+            description: waterStorageError.message || "儲存飲水記錄時發生未知的錯誤。",
             variant: "destructive",
             duration: 7000,
         });
@@ -403,7 +411,7 @@ export default function CalorieLogger() {
 
        try {
            const entryDateObj = new Date(entry.timestamp);
-           if (!isValid(entryDateObj)) { // Check if date is valid using date-fns
+           if (!isValidDate(entryDateObj)) { // Use utility function
                 console.warn("Skipping log entry with invalid timestamp:", entry);
                 return; // Skip entries with invalid timestamps
             }
@@ -846,18 +854,32 @@ export default function CalorieLogger() {
 
       const result = await estimateCalorieCount({ photoDataUri });
 
-      if (result.confidence < 0.5) {
+      // Check if the AI thinks it's not a food item
+      if (!result.isFoodItem) {
+        toast({
+          title: "這可能是非食物物品",
+          description: `AI 認為圖片中的物品是「${result.foodItem}」而非食物。您仍然可以記錄，但卡路里可能不準確。`,
+          variant: "default", // Use default (yellowish) or a custom variant for warnings
+          duration: 7000, // Show longer
+        });
+        // Set calories to 0 if not food
+        setEditedCalorieEstimate('0');
+      } else if (result.confidence < 0.5) {
+         // Existing low confidence warning for food items
          toast({
           title: "低信賴度估計",
           description: "影像可能不清晰，或難以辨識食物品項。卡路里估計值可能較不準確。",
           variant: "default",
           duration: 5000, // Show longer
         });
+         setEditedCalorieEstimate(result.calorieEstimate.toString()); // Pre-fill if it's food
+      } else {
+          setEditedCalorieEstimate(result.calorieEstimate.toString()); // Pre-fill if it's food with good confidence
       }
 
-      setEstimationResult(result);
-      setEditedFoodItem(result.foodItem); // Pre-fill editable name
-      setEditedCalorieEstimate(result.calorieEstimate.toString()); // Pre-fill editable calories as string
+
+      setEstimationResult(result); // Set the full result including isFoodItem
+      setEditedFoodItem(result.foodItem); // Pre-fill editable name (might be non-food item name)
       fetchCurrentLocation(); // Attempt to fetch location after getting result
 
     } catch (err) {
@@ -911,11 +933,14 @@ export default function CalorieLogger() {
 
 
     // Check for imageSrc being present as it's now required for the log entry
-    if (estimationResult && imageSrc) { // Use estimationResult for confidence, but edited values for others
-      // Create entry based on the storage interface (now includes imageUrl)
+    // Use estimationResult for confidence and isFoodItem, but edited values for others
+    if (estimationResult && imageSrc) {
+      // Create entry based on the storage interface (now includes imageUrl and isFoodItem)
       const newLogEntry: LogEntryStorage = {
-        // Use confidence from original estimation, but other values from edited state
+        // Use confidence and isFoodItem from original estimation
         confidence: estimationResult.confidence,
+        isFoodItem: estimationResult.isFoodItem, // Store the isFoodItem flag
+        // Use edited values for the rest
         calorieEstimate: parsedCalories, // Use the parsed edited calorie value
         foodItem: editedFoodItem.trim(), // Use the trimmed edited name
         id: Date.now().toString(),
@@ -928,7 +953,7 @@ export default function CalorieLogger() {
 
       try {
         // Limit the log size (e.g., keep only the latest N entries)
-        const MAX_LOG_ENTRIES = 100; // Increase limit slightly if needed, but keep it reasonable
+        const MAX_LOG_ENTRIES = 100; // Keep it reasonable to avoid quota issues
         setCalorieLog(prevLog => {
            // Ensure prevLog is an array before spreading
            const currentLog = Array.isArray(prevLog) ? prevLog : [];
@@ -946,7 +971,8 @@ export default function CalorieLogger() {
         if (saveError instanceof LocalStorageError) {
              toast({
                 title: "記錄儲存失敗",
-                description: saveError.message, // Display the user-friendly message
+                // Display the user-friendly message from the hook or error
+                description: saveError.message || "儲存卡路里記錄時發生錯誤，可能是儲存空間已滿。",
                 variant: "destructive",
                 duration: 9000, // Show longer
              });
@@ -1029,7 +1055,7 @@ export default function CalorieLogger() {
         // Catch potential errors thrown by the setter (though unlikely with current hook setup)
          console.error("Error explicitly caught while deleting log entry:", deleteError);
          if (deleteError instanceof LocalStorageError) {
-              toast({ title: "刪除錯誤", description: deleteError.message, variant: "destructive", duration: 7000 });
+              toast({ title: "刪除錯誤", description: deleteError.message || "刪除記錄項目時發生儲存錯誤。", variant: "destructive", duration: 7000 });
          } else {
             toast({ title: "刪除錯誤", description: "刪除記錄項目時發生未預期的錯誤。", variant: "destructive" });
         }
@@ -1118,7 +1144,7 @@ export default function CalorieLogger() {
             return currentLog.map(entry =>
                 entry.id === id
                     ? {
-                        ...entry, // Keep original confidence, id, imageUrl
+                        ...entry, // Keep original confidence, id, imageUrl, isFoodItem
                         foodItem: editedEntryData.foodItem!.trim(),
                         calorieEstimate: editedCalories, // Already validated number
                         timestamp: editedTimestamp, // Use parsed timestamp
@@ -1143,7 +1169,7 @@ export default function CalorieLogger() {
         // Catch potential errors thrown by the setter (though unlikely with current hook setup)
          console.error("Error explicitly caught while saving edited entry:", saveError);
          if (saveError instanceof LocalStorageError) {
-              toast({ title: "更新錯誤", description: saveError.message, variant: "destructive", duration: 7000 });
+              toast({ title: "更新錯誤", description: saveError.message || "更新記錄項目時發生儲存錯誤。", variant: "destructive", duration: 7000 });
          } else {
              toast({ title: "更新錯誤", description: "更新記錄項目時發生未預期的錯誤。", variant: "destructive" });
          }
@@ -1178,7 +1204,7 @@ export default function CalorieLogger() {
     } catch (saveError) {
         console.error("Error explicitly caught while saving water log:", saveError);
          if (saveError instanceof LocalStorageError) {
-             toast({ title: "飲水記錄錯誤", description: saveError.message, variant: "destructive", duration: 7000 });
+             toast({ title: "飲水記錄錯誤", description: saveError.message || "儲存飲水記錄時發生儲存錯誤。", variant: "destructive", duration: 7000 });
          } else {
             toast({ title: "飲水記錄錯誤", description: "儲存飲水記錄時發生未預期的錯誤。", variant: "destructive" });
          }
@@ -1195,8 +1221,10 @@ export default function CalorieLogger() {
     setUserProfile(prev => {
         // Ensure prev is an object, default to empty if not
         const currentProfile = typeof prev === 'object' && prev !== null ? prev : {};
-        const newProfile = { ...currentProfile };
+        let newProfile = { ...currentProfile }; // Create a new object for modification
         let processedValue: number | Gender | ActivityLevel | undefined;
+
+        let valueChanged = false; // Flag to track if value actually changed
 
         if (field === 'height' || field === 'weight' || field === 'age' || field === 'targetWaterIntake') {
             const numValue = value === '' ? undefined : parseFloat(value as string);
@@ -1217,15 +1245,18 @@ export default function CalorieLogger() {
              processedValue = validGenders.includes(value as string) ? (value as Gender) : undefined;
         }
         else {
-             return prev; // Return original state if field is unknown
+             // If field is unknown, return the original state object
+             return prev;
         }
 
-        // Check if the value actually changed before updating
+        // Check if the value actually changed
         if (newProfile[field] !== processedValue) {
            newProfile[field] = processedValue;
-           return newProfile;
+           valueChanged = true;
         }
-        return prev; // No change, return previous state
+
+        // Return the new state only if the value changed, otherwise return the previous state reference
+        return valueChanged ? newProfile : prev;
     });
  }, [setUserProfile, isClient]); // Added isClient dependency
 
@@ -1290,6 +1321,15 @@ export default function CalorieLogger() {
           <CardHeader>
             <CardTitle>記錄詳細資訊</CardTitle>
              <CardDescription>記錄前請檢視並編輯詳細資訊。</CardDescription>
+              {/* Warning if AI detected non-food item */}
+             {!estimationResult.isFoodItem && (
+                 <Alert variant="default" className="bg-yellow-100 border-yellow-300 text-yellow-800 mt-2">
+                   <AlertTitle className="font-semibold">注意：這可能不是食物</AlertTitle>
+                   <AlertDescription>
+                     AI 認為這張圖片不是食物品項 ({estimationResult.foodItem})。您可以繼續記錄，但卡路里可能不準確。
+                   </AlertDescription>
+                 </Alert>
+             )}
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Preview Image (cropped and compressed) */}
@@ -1349,8 +1389,9 @@ export default function CalorieLogger() {
                  {/* Conditional rendering for confidence */}
                 <p className={estimationResult.confidence < 0.7 ? 'text-orange-600' : 'text-muted-foreground'}> {/* Use muted-foreground for normal */}
                     <strong className="font-medium">AI 估計信賴度：</strong>
-                    {Math.round(estimationResult.confidence * 100)}%
-                     {estimationResult.confidence < 0.5 && <span className="ml-1 text-xs">(低)</span>}
+                     {/* Show N/A if it wasn't a food item */}
+                    {estimationResult.isFoodItem ? `${Math.round(estimationResult.confidence * 100)}%` : 'N/A'}
+                     {estimationResult.isFoodItem && estimationResult.confidence < 0.5 && <span className="ml-1 text-xs">(低)</span>}
                 </p>
 
             </div>
@@ -1563,8 +1604,8 @@ export default function CalorieLogger() {
                     </>
                 ) : (
                     <>
-                        {/* Removed 'truncate', kept 'break-words' */}
-                        <p className="font-semibold text-base break-words">{entry.foodItem || '未知食物'}</p>
+                        {/* Use line-clamp-2 for food item, allow break-words */}
+                        <p className="font-semibold text-base line-clamp-2 break-words">{entry.foodItem || '未知食物'}</p>
                         <p className="text-sm text-primary">
                            {typeof entry.calorieEstimate === 'number' && !isNaN(entry.calorieEstimate) ? entry.calorieEstimate : '??'} 大卡
                         </p>
@@ -1578,20 +1619,29 @@ export default function CalorieLogger() {
                                 )}
                                 <span>
                                     {/* Safely format date */}
-                                    {isValid(new Date(entryTimestamp)) ? format(new Date(entryTimestamp), 'yyyy/MM/dd HH:mm') : '無效時間'}
+                                    {isValidDate(new Date(entryTimestamp)) ? format(new Date(entryTimestamp), 'yyyy/MM/dd HH:mm') : '無效時間'}
                                 </span>
                             </div>
                             {entry.location && (
                                 <div className="flex items-center">
                                     <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
-                                     {/* Removed 'truncate', kept 'break-words' */}
-                                    <span className="break-words">{entry.location}</span>
+                                     {/* Use line-clamp-1 for location, allow break-words */}
+                                    <span className="line-clamp-1 break-words">{entry.location}</span>
                                 </div>
                             )}
                             {entry.amount !== undefined && entry.amount !== null && typeof entry.amount === 'number' && !isNaN(entry.amount) && (
                                 <div className="flex items-center">
                                     <DollarSign className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
                                     <span>{entry.amount.toFixed(2)} 元</span>
+                                </div>
+                            )}
+                             {/* Show warning icon if AI flagged as not food */}
+                             {!entry.isFoodItem && (
+                                <div className="flex items-center text-yellow-600" title="AI 認為此項目可能不是食物">
+                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                      </svg>
+                                    <span>非食物?</span>
                                 </div>
                             )}
                         </div>
@@ -2048,7 +2098,7 @@ export default function CalorieLogger() {
                        let summaryDate: Date | null = null;
                        try {
                            summaryDate = parseISO(summary.date); // Parse the date string
-                           if (!isValid(summaryDate)) { // Check if parsing was successful
+                           if (!isValidDate(summaryDate)) { // Use utility function
                               console.warn(`Invalid date string in summary: ${summary.date}`);
                               summaryDate = null; // Treat as invalid
                            }
