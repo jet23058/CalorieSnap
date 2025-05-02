@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingSpinner } from '@/components/loading-spinner';
-import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban, GlassWater, Droplet, PersonStanding, CalendarDays, AlertCircle, Maximize } from 'lucide-react'; // Added AlertCircle, Maximize
+import { Camera, Trash2, PlusCircle, UtensilsCrossed, X, MapPin, LocateFixed, DollarSign, Coffee, Sun, Moon, Apple, ImageOff, ImageUp, Crop, User, Activity, Weight, Ruler, BarChart3, Pencil, Save, Ban, GlassWater, Droplet, PersonStanding, CalendarDays, AlertCircle, Maximize, BellRing } from 'lucide-react'; // Added AlertCircle, Maximize, BellRing
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog';
 import ReactCrop, { type Crop as CropType, centerCrop, makeAspectCrop, PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -24,6 +24,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { format, startOfDay, parseISO, isValid, isDate } from 'date-fns';
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
+import { Sheet, SheetTrigger } from '@/components/ui/sheet'; // Import Sheet components
+import { NotificationSettingsSheet } from '@/components/notification-settings-sheet'; // Import the new sheet component
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -80,7 +82,7 @@ interface UserProfile {
     age?: number; // in years
     gender?: Gender;
     activityLevel?: ActivityLevel;
-    targetWaterIntake?: number; // in ml
+    targetWaterIntake?: number; // in ml - User defined target
 }
 
 // Daily Summary Interface
@@ -98,7 +100,7 @@ type EditedEntryData = Partial<Pick<LogEntryStorage, 'foodItem' | 'calorieEstima
 
 // Compression settings
 const IMAGE_MAX_WIDTH = 1024; // Max width for the compressed image
-const IMAGE_QUALITY = 0.2; // JPEG quality (0 to 1)
+const IMAGE_QUALITY = 0.2; // JPEG quality (0 to 1) - Updated
 const CROP_ASPECT = 16 / 9; // Aspect ratio for the crop tool
 
 
@@ -174,7 +176,7 @@ function getCroppedImg(
 
       },
       'image/jpeg',
-      IMAGE_QUALITY
+      IMAGE_QUALITY // Use updated quality
     );
   });
 }
@@ -724,7 +726,7 @@ export default function CalorieLogger() {
         // Convert canvas to JPEG data URI with specified quality
         let dataUri: string;
         try {
-           dataUri = canvas.toDataURL('image/jpeg', IMAGE_QUALITY);
+           dataUri = canvas.toDataURL('image/jpeg', IMAGE_QUALITY); // Use updated quality
              // Fallback for browsers that might not support jpeg canvas output well
              if (!dataUri || dataUri === 'data:,') {
                 console.warn("toDataURL('image/jpeg') 失敗，改用 png 格式。"); // Translated warning
@@ -1233,6 +1235,7 @@ export default function CalorieLogger() {
   const basalMetabolicRate = useMemo(() => calculateBMR(userProfile), [userProfile]);
   const bodyMassIndex = useMemo(() => calculateBMI(userProfile.height, userProfile.weight), [userProfile.height, userProfile.weight]);
   const recommendedWater = useMemo(() => calculateRecommendedWater(userProfile.weight), [userProfile.weight]);
+  const defaultWaterTarget = 2000; // 2000ml = 8 standard cups approx.
 
 
   // Triggers the hidden file input click event
@@ -1609,7 +1612,7 @@ export default function CalorieLogger() {
                 ) : (
                     // --- Display Mode ---
                     <>
-                        <p className="font-semibold text-base break-words">{entry.foodItem || '未知項目'}</p> {/* Use break-words for long names */}
+                        <p className="font-semibold text-base truncate">{entry.foodItem || '未知項目'}</p> {/* Use break-words for long names */}
                         <p className="text-sm text-primary">
                            {/* Safely display calories, showing '??' if invalid */}
                            {typeof entry.calorieEstimate === 'number' && !isNaN(entry.calorieEstimate) ? entry.calorieEstimate : '??'} 大卡
@@ -1634,7 +1637,7 @@ export default function CalorieLogger() {
                             {entry.location && (
                                 <div className="flex items-center">
                                     <MapPin className="h-3.5 w-3.5 inline-block mr-1 flex-shrink-0" />
-                                    <span className="break-words">{entry.location}</span> {/* Allow location to wrap */}
+                                    <span className="truncate">{entry.location}</span> {/* Allow location to wrap */}
                                 </div>
                             )}
                             {/* Display amount if available and valid */}
@@ -1833,11 +1836,23 @@ export default function CalorieLogger() {
 
         {/* Card for Daily Water Tracking */}
         <Card>
-            <CardHeader>
-                <CardTitle className="flex items-center gap-2"><GlassWater size={20} /> 每日飲水追蹤</CardTitle>
-                <CardDescription>記錄您今天喝了多少水。</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+                 <div className="space-y-1">
+                    <CardTitle className="flex items-center gap-2"><GlassWater size={20} /> 每日飲水追蹤</CardTitle>
+                    <CardDescription>記錄您今天喝了多少水。</CardDescription>
+                 </div>
+                 {/* Notification Settings Sheet Trigger */}
+                 <Sheet>
+                    <SheetTrigger asChild>
+                        <Button variant="ghost" size="icon" className="text-muted-foreground">
+                            <BellRing size={18} />
+                            <span className="sr-only">開啟通知設定</span>
+                        </Button>
+                    </SheetTrigger>
+                    <NotificationSettingsSheet />
+                 </Sheet>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 pt-4">
                 {/* Display water storage error if any */}
                 {waterStorageError && (
                      <Alert variant="destructive">
@@ -1873,31 +1888,39 @@ export default function CalorieLogger() {
                 </div>
                 {/* Display current intake and progress */}
                 <div className="space-y-2 pt-2">
-                    <div className="flex justify-between items-center text-sm">
-                        <span className="text-muted-foreground">今日已喝：</span>
-                        <span className="font-medium text-primary">{currentWaterIntake} 毫升</span>
-                    </div>
-                     {/* Show progress bar if target or recommendation exists */}
-                     {(userProfile.targetWaterIntake !== undefined && userProfile.targetWaterIntake > 0) || (recommendedWater !== null && recommendedWater > 0) ? (
-                         <>
-                             <Progress
-                                // Calculate progress based on target or recommendation
-                                value={(currentWaterIntake / (userProfile.targetWaterIntake ?? recommendedWater ?? 1)) * 100}
-                                className="h-2"
-                                aria-label={`飲水進度 ${Math.round((currentWaterIntake / (userProfile.targetWaterIntake ?? recommendedWater ?? 1)) * 100)}%`}
-                            />
-                             <div className="flex justify-between items-center text-xs text-muted-foreground">
-                                <span>0 毫升</span>
-                                <span>
-                                    目標：{userProfile.targetWaterIntake ?? recommendedWater ?? 'N/A'} 毫升
-                                    {/* Indicate if the target is a recommendation */}
-                                    {!userProfile.targetWaterIntake && recommendedWater && " (建議)"}
-                                </span>
-                             </div>
-                         </>
-                     ) : (
-                         // Prompt user to enter data for progress
-                         <p className="text-xs text-muted-foreground text-center">輸入體重或設定目標以查看進度。</p>
+                     <div className="flex justify-between items-center text-sm">
+                         <span className="text-muted-foreground">今日已喝：</span>
+                         <span className="font-medium text-primary">{currentWaterIntake} 毫升</span>
+                     </div>
+                     {/* Determine the target for the progress bar */}
+                     {(() => {
+                         const target = userProfile.targetWaterIntake ?? recommendedWater ?? defaultWaterTarget; // Prioritize user target, then recommendation, then default
+                         const progressValue = target > 0 ? (currentWaterIntake / target) * 100 : 0;
+                         const targetLabel = userProfile.targetWaterIntake
+                             ? `${userProfile.targetWaterIntake} 毫升`
+                             : recommendedWater
+                             ? `${recommendedWater} 毫升 (建議)`
+                             : `${defaultWaterTarget} 毫升 (預設)`;
+
+                         return (
+                             <>
+                                 <Progress
+                                     value={progressValue}
+                                     className="h-2"
+                                     aria-label={`飲水進度 ${Math.round(progressValue)}%`}
+                                 />
+                                 <div className="flex justify-between items-center text-xs text-muted-foreground">
+                                     <span>0 毫升</span>
+                                     <span>目標：{targetLabel}</span>
+                                 </div>
+                             </>
+                         );
+                     })()}
+                     {/* Suggestion if neither user target nor weight is provided */}
+                     {!userProfile.targetWaterIntake && recommendedWater === null && (
+                         <p className="text-xs text-muted-foreground text-center">
+                             輸入體重或設定目標，以查看更個人化的建議與進度。預設目標為 {defaultWaterTarget} 毫升 (約 8 杯)。
+                         </p>
                      )}
                 </div>
 
@@ -1973,7 +1996,7 @@ export default function CalorieLogger() {
                             <SelectTrigger id="gender" aria-label="選取生理性別">
                                 <SelectValue placeholder={isClient ? "選取您的生理性別" : undefined}>
                                   {/* Display selected gender translation or placeholder */}
-                                  {userProfile?.gender ? genderTranslations[userProfile.gender] : (isClient ? "選取您的生理性別" : null)}
+                                  {isClient && userProfile?.gender ? genderTranslations[userProfile.gender] : (isClient ? "選取您的生理性別" : null)}
                                 </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
@@ -1994,7 +2017,7 @@ export default function CalorieLogger() {
                         <SelectTrigger id="activityLevel" aria-label="選取活動水平">
                            <SelectValue placeholder={isClient ? "選取您的活動水平" : undefined}>
                               {/* Display selected activity level translation or placeholder */}
-                              {userProfile?.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : (isClient ? "選取您的活動水平" : null)}
+                              {isClient && userProfile?.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : (isClient ? "選取您的活動水平" : null)}
                            </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
@@ -2006,21 +2029,24 @@ export default function CalorieLogger() {
                 </div>
                  {/* Target Water Intake */}
                  <div className="space-y-1">
-                    <Label htmlFor="targetWaterIntake" className="flex items-center gap-1"><Droplet size={14}/> 每日目標飲水量 (毫升)</Label>
+                     <Label htmlFor="targetWaterIntake" className="flex items-center gap-1"><Droplet size={14}/> 每日目標飲水量 (毫升)</Label>
                     <Input
                         id="targetWaterIntake"
                         type="number"
                         value={userProfile?.targetWaterIntake ?? ''}
                         onChange={(e) => handleProfileChange('targetWaterIntake', e.target.value)}
-                        placeholder={`例如：${recommendedWater ?? 2000}`} // Suggest recommended or default
+                        placeholder={`例如：${recommendedWater ?? defaultWaterTarget}`} // Suggest recommended or default
                         min="0"
                         step="100" // Allow increments of 100ml
                         aria-label="輸入每日目標飲水量（毫升）"
                     />
                     {/* Show recommendation if target is not set */}
-                    {recommendedWater && userProfile.targetWaterIntake === undefined && (
+                    {recommendedWater !== null && userProfile.targetWaterIntake === undefined && (
                         <p className="text-xs text-muted-foreground pt-1">根據您的體重，建議每日飲用約 {recommendedWater} 毫升。</p>
                     )}
+                     {recommendedWater === null && userProfile.targetWaterIntake === undefined && (
+                         <p className="text-xs text-muted-foreground pt-1">一般建議成人每日飲用約 {defaultWaterTarget} 毫升 (約 8 杯水)。</p>
+                     )}
                 </div>
 
                 <Separator className="my-4"/>
@@ -2217,4 +2243,3 @@ export default function CalorieLogger() {
     </div>
   );
 }
-
