@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -18,14 +17,14 @@ import { BellRing, Clock } from 'lucide-react';
 import useLocalStorage from '@/hooks/use-local-storage';
 import { useToast } from '@/hooks/use-toast';
 
-interface NotificationSettings {
+export interface NotificationSettings {
   enabled: boolean;
   frequency: number; // minutes
   startTime: string; // HH:mm
   endTime: string; // HH:mm
 }
 
-const defaultSettings: NotificationSettings = {
+export const defaultSettings: NotificationSettings = {
   enabled: false,
   frequency: 60, // Default to every 60 minutes
   startTime: '09:00', // Default start time 9 AM

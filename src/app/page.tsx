@@ -7,8 +7,9 @@ export default function Home() {
         卡路里快照
       </h1>
       <p className="text-center text-muted-foreground mb-8">
-        拍下您的食物照片，以估算其卡路里數並記錄您的餐點。
+        拍下您的食物照片，估算卡路里、記錄餐點、追蹤飲水並管理您的健康資料。
       </p>
+      {/* CalorieLogger now contains the Tabs component */}
       <CalorieLogger />
     </main>
   );
