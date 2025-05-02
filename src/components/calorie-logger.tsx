@@ -829,11 +829,16 @@ export default function CalorieLogger() {
         });
     } catch (e) {
         console.error("刪除記錄項目時發生錯誤:", e);
-        toast({
-            title: "刪除錯誤",
-            description: `移除項目時發生錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`,
-            variant: "destructive",
-        });
+         // Handle potential LocalStorage errors during update (less likely for delete, but possible)
+        if (e instanceof LocalStorageError) {
+             toast({ title: "刪除錯誤", description: e.message, variant: "destructive" });
+        } else {
+            toast({
+                title: "刪除錯誤",
+                description: `移除項目時發生錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`,
+                variant: "destructive",
+            });
+        }
     }
 };
 
@@ -937,9 +942,14 @@ export default function CalorieLogger() {
         console.error("儲存編輯後的項目時發生錯誤:", e);
         // Handle potential LocalStorage errors during update
         if (e instanceof LocalStorageError) {
-            toast({ title: "更新錯誤", description: e.message, variant: "destructive" });
+             toast({
+                title: "更新錯誤",
+                description: "無法更新此項目。瀏覽器儲存空間可能已滿。",
+                variant: "destructive",
+                duration: 7000,
+            });
         } else {
-            toast({ title: "更新錯誤", description: "儲存變更時發生未預期的錯誤。", variant: "destructive" });
+            toast({ title: "更新錯誤", description: `儲存變更時發生未預期的錯誤: ${e instanceof Error ? e.message : 'Unknown error'}`, variant: "destructive" });
         }
     }
   };
@@ -955,7 +965,28 @@ export default function CalorieLogger() {
         } else if (field === 'activityLevel') {
             newProfile[field] = value as ActivityLevel | undefined;
         }
-        return newProfile;
+        // Add try-catch for saving user profile as well
+        try {
+           // Save to local storage immediately (assuming setUserProfile does this)
+           // Or call the setter from useLocalStorage explicitly if needed
+            return newProfile;
+        } catch (e) {
+            if (e instanceof LocalStorageError) {
+                toast({
+                    title: "個人資料儲存錯誤",
+                    description: "無法儲存個人資料變更。儲存空間可能已滿。",
+                    variant: "destructive",
+                });
+            } else {
+                toast({
+                    title: "個人資料儲存錯誤",
+                    description: `儲存個人資料時發生未預期的錯誤。`,
+                    variant: "destructive",
+                });
+            }
+             // Revert state if save failed? Or just notify.
+            return prev; // Keep previous state on error
+        }
     });
  };
 
