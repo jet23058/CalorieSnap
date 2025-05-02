@@ -24,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-Hant"> {/* Set language to Traditional Chinese */}
+    <html lang="zh-Hant">{/* Set language to Traditional Chinese */}
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
         <Toaster /> {/* Add Toaster here */}
