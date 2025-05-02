@@ -17,7 +17,6 @@ import {
   Edit,
   Trash2,
   Bell,
-  // BarChart, // Removed as it's not used currently
   ZoomIn,
   X,
   UploadCloud,
@@ -35,6 +34,7 @@ import {
   Image as ImageIcon, // Added for photo achievement badge
   NotebookText, // Icon for Nutritionist Comments
   ArrowDownUp, // Icon for sorting
+  Target, // Icon for Health Goal
 } from 'lucide-react';
 import {
   Tabs,
@@ -82,6 +82,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"; // Imp
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 type LogViewMode = 'daily' | 'monthly';
 type MonthlySortCriteria = 'time-desc' | 'time-asc' | 'calories-desc' | 'calories-asc';
+type HealthGoal = 'muscleGain' | 'fatLoss' | 'maintenance'; // New type for health goals
 
 
 export interface CalorieLogEntry {
@@ -111,6 +112,7 @@ export interface UserProfile {
   height: number | null; // cm
   weight: number | null; // kg
   activityLevel: 'sedentary' | 'light' | 'moderate' | 'active' | 'veryActive' | null;
+  healthGoal: HealthGoal | null; // Added health goal
 }
 
 const activityLevelMultipliers = {
@@ -138,6 +140,13 @@ const mealTypeTranslations: Record<string, string> = {
   Snack: "點心",
 };
 
+// Translations for health goals
+const healthGoalTranslations: Record<HealthGoal, string> = {
+  muscleGain: "增肌",
+  fatLoss: "減脂",
+  maintenance: "維持",
+};
+
 // Default User Profile
 const defaultUserProfile: UserProfile = {
   age: null,
@@ -145,6 +154,7 @@ const defaultUserProfile: UserProfile = {
   height: null,
   weight: null,
   activityLevel: null,
+  healthGoal: null, // Added default health goal
 };
 
 // Helper function to calculate BMR (Harris-Benedict Equation)
@@ -163,13 +173,30 @@ const calculateBMR = (profile: UserProfile): number | null => {
 };
 
 // Helper function to calculate Daily Calorie Needs (BMR * Activity Level)
+// Adjust based on health goal (simple example: +- 300 kcal)
 const calculateDailyCalories = (profile: UserProfile): number | null => {
   const bmr = calculateBMR(profile);
   if (!bmr || !profile.activityLevel) {
     return null;
   }
   const multiplier = activityLevelMultipliers[profile.activityLevel];
-  return bmr * multiplier;
+  let maintenanceCalories = bmr * multiplier;
+
+  // Adjust based on goal
+  switch (profile.healthGoal) {
+      case 'muscleGain':
+          maintenanceCalories += 300; // Example surplus
+          break;
+      case 'fatLoss':
+          maintenanceCalories -= 300; // Example deficit
+          break;
+      case 'maintenance':
+      default:
+          // No adjustment needed
+          break;
+  }
+
+  return maintenanceCalories;
 };
 
 // Helper function to calculate BMI
@@ -460,7 +487,24 @@ export default function CalorieLogger() {
             setIsCropping(false); // Close the crop dialog
         }
     } else {
-        toast({ variant: 'destructive', title: '錯誤', description: '無效的裁切區域。請選取一個區域。' });
+         // If no specific crop area selected, use the full image
+         if (imageSrc) {
+             setIsLoading(true);
+             setError(null);
+             setEstimation(null);
+             try {
+                 await handleImageEstimation(imageSrc); // Send original image
+             } catch (e) {
+                 console.error("處理影像時發生錯誤:", e);
+                 setError('處理影像時發生錯誤。');
+                 toast({ variant: 'destructive', title: '錯誤', description: '處理影像時發生錯誤。' });
+             } finally {
+                 setIsLoading(false);
+                 setIsCropping(false); // Close the crop dialog
+             }
+         } else {
+            toast({ variant: 'destructive', title: '錯誤', description: '沒有影像可處理。' });
+         }
     }
 };
 
@@ -492,6 +536,9 @@ export default function CalorieLogger() {
         setIsCropping(true);
         setEstimation(null); // Clear previous estimation
         setError(null);
+        // Reset crop state for the new image
+        setCrop(undefined);
+        setCompletedCrop(undefined);
 
       } else {
         setError("無法取得畫布內容。");
@@ -514,6 +561,9 @@ export default function CalorieLogger() {
         setIsCropping(true);
         setEstimation(null); // Clear previous estimation
         setError(null);
+         // Reset crop state for the new image
+         setCrop(undefined);
+         setCompletedCrop(undefined);
       };
       reader.onerror = () => {
           setError("讀取檔案時發生錯誤。");
@@ -535,7 +585,11 @@ export default function CalorieLogger() {
           console.log("正在估算影像...");
           const result = await estimateCalorieCount({ photoDataUri: imageDataUrl });
           console.log("估算結果:", result);
-          setEstimation(result); // Update with new estimation
+          // Update with new estimation, defaulting foodItem if empty
+           setEstimation({
+               ...result,
+               foodItem: result.foodItem || "未命名食物", // Set default if AI returns empty string
+           });
 
           // Display warning if not a food item, but allow logging
           if (!result.isFoodItem) {
@@ -543,7 +597,7 @@ export default function CalorieLogger() {
                 // Use the custom orange variant defined in ui/alert.tsx
                 variant: "orange" as any, // Cast to any to bypass type check for custom variant
                 title: "注意：可能不是食物",
-                description: `偵測到的項目「${result.foodItem}」可能不是食物。您仍然可以記錄它，但請仔細檢查卡路里。`,
+                description: `偵測到的項目「${result.foodItem || '未知'}」可能不是食物。您仍然可以記錄它，但請仔細檢查卡路里。`,
              });
           }
 
@@ -564,18 +618,52 @@ export default function CalorieLogger() {
 
   // --- Logging Logic ---
 
-  // Placeholder function to get nutritionist comment (replace with actual logic/AI call)
-  const getNutritionistComment = (entry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'>): string => {
+  // Updated placeholder function for nutritionist comment, considering health goals
+  const getNutritionistComment = (
+      entry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'>,
+      goal: HealthGoal | null
+  ): string => {
+      let comment = '';
+
       // Basic example logic based on calories
       if (entry.calorieEstimate > 600) {
-          return `提醒：此餐點熱量 (${Math.round(entry.calorieEstimate)} 卡) 偏高。建議留意份量控制，或搭配較低熱量的食物。多攝取蔬菜水果有助於均衡營養。`;
+          comment += `提醒：此餐點熱量 (${Math.round(entry.calorieEstimate)} 卡) 偏高。`;
+          if (goal === 'fatLoss') {
+              comment += `對於減脂目標，建議留意份量控制，或搭配較低熱量的食物。`;
+          } else if (goal === 'muscleGain') {
+              comment += `對於增肌目標，高熱量可以是好的，但請確保蛋白質攝取充足。`;
+          } else {
+              comment += `建議留意份量控制。`;
+          }
+          comment += `多攝取蔬菜水果有助於均衡營養。`;
       } else if (entry.calorieEstimate < 200 && entry.mealType !== 'Snack') {
-          return `注意：此餐點熱量 (${Math.round(entry.calorieEstimate)} 卡) 可能偏低。請確保攝取足夠的營養以維持身體機能。可考慮增加蛋白質或健康脂肪的攝取。`;
+          comment += `注意：此餐點熱量 (${Math.round(entry.calorieEstimate)} 卡) 可能偏低。請確保攝取足夠的營養以維持身體機能。`;
+          if (goal === 'muscleGain') {
+               comment += `對於增肌目標，確保總熱量和蛋白質攝取足夠非常重要。`;
+          }
+          comment += `可考慮增加蛋白質或健康脂肪的攝取。`;
       } else if (entry.foodItem.toLowerCase().includes('點心') || entry.foodItem.toLowerCase().includes('甜點') || entry.mealType === 'Snack') {
-          return `提醒：點心建議選擇天然、未加工的食物，如水果、堅果或優格，以獲取更豐富的營養。注意糖分攝取。`;
+           comment += `提醒：點心建議選擇天然、未加工的食物，如水果、堅果或優格，以獲取更豐富的營養。`;
+           if (goal === 'fatLoss') {
+               comment += `特別注意糖分攝取，避免高糖點心。`;
+           }
       }
-      // Default comment if no specific condition met
-      return `請保持均衡飲食，多樣化攝取各類食物，並注意水分補充。`;
+
+      // Add general advice if no specific comment triggered yet
+      if (comment === '') {
+          comment = `均衡飲食，多樣化攝取各類食物，並注意水分補充。`;
+      }
+
+      // Add goal-specific general advice
+      if (goal === 'muscleGain') {
+          comment += ` 增肌期間，請確保攝取足夠的蛋白質（建議每公斤體重 1.6-2.2 克）並進行適當的阻力訓練。`;
+      } else if (goal === 'fatLoss') {
+          comment += ` 減脂期間，除了控制熱量，也要確保蛋白質攝取以維持肌肉量，並結合有氧和阻力運動。`;
+      } else if (goal === 'maintenance') {
+          comment += ` 維持體重需要持續關注飲食均衡和規律運動。`;
+      }
+
+      return comment.trim(); // Trim leading/trailing whitespace
   };
 
 
@@ -584,7 +672,7 @@ export default function CalorieLogger() {
     if (imageSrc) {
         const currentEstimation = estimation; // Capture current estimation state
         const baseEntry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'> = {
-            foodItem: currentEstimation?.foodItem ?? "未辨識", // Default if no estimation
+            foodItem: currentEstimation?.foodItem || "未命名食物", // Use default placeholder
             calorieEstimate: currentEstimation?.isFoodItem ? (currentEstimation.calorieEstimate ?? 0) : 0, // Use 0 if not food or undefined
             imageUrl: imageSrc, // Log the (potentially cropped) image
             timestamp: new Date().toISOString(),
@@ -594,8 +682,8 @@ export default function CalorieLogger() {
             confidence: currentEstimation?.isFoodItem ? (currentEstimation.confidence ?? 0) : 0, // Use 0 if not food or undefined
         };
 
-         // Generate nutritionist comment based on the entry details
-        const nutritionistComment = getNutritionistComment(baseEntry);
+         // Generate nutritionist comment based on the entry details and user's goal
+        const nutritionistComment = getNutritionistComment(baseEntry, userProfile.healthGoal);
 
         const newEntry: CalorieLogEntry = {
             ...baseEntry,
@@ -619,7 +707,7 @@ export default function CalorieLogger() {
 
         toast({
           title: "記錄成功",
-          description: `${newEntry.foodItem} (${newEntry.calorieEstimate} 卡) 已新增至您的記錄。`,
+          description: `${newEntry.foodItem} (${Math.round(newEntry.calorieEstimate)} 卡) 已新增至您的記錄。`,
         });
 
         // Clear image and estimation after successful logging
@@ -710,7 +798,7 @@ export default function CalorieLogger() {
       try {
          // Re-generate nutritionist comment if relevant fields changed
          const baseEntry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'> = { ...editingEntry };
-         const updatedComment = getNutritionistComment(baseEntry);
+         const updatedComment = getNutritionistComment(baseEntry, userProfile.healthGoal); // Pass goal
          const finalEntry = { ...editingEntry, nutritionistComment: updatedComment };
 
 
@@ -779,6 +867,14 @@ export default function CalorieLogger() {
           } else if (value !== null && !['male', 'female', 'other'].includes(value)) {
              processedValue = null;
           }
+      }
+       // Ensure healthGoal is one of the valid options or null
+      if (field === 'healthGoal') {
+         if (value === 'none') {
+             processedValue = null;
+         } else if (value !== null && !['muscleGain', 'fatLoss', 'maintenance'].includes(value)) {
+             processedValue = null;
+         }
       }
 
        try {
@@ -1040,13 +1136,24 @@ export default function CalorieLogger() {
                      </AlertDescription>
                  </Alert>
             )}
+            {/* Editable Food Item Name */}
             <div className="flex items-center justify-between">
-                <span className="font-medium text-foreground">偵測到的食物：</span>
-                <span className="text-muted-foreground">{estimation?.foodItem ?? '讀取中...'}</span>
+               <Label htmlFor="est-foodItem" className="font-medium text-foreground flex items-center shrink-0 pr-2">
+                   <Edit size={12} className="mr-1 opacity-70"/> 食物名稱：
+               </Label>
+               <Input
+                   id="est-foodItem"
+                   type="text"
+                   value={estimation?.foodItem ?? ''}
+                   onChange={(e) => setEstimation(prev => prev ? { ...prev, foodItem: e.target.value } : null)}
+                   className="font-semibold text-primary h-8 flex-grow text-right"
+                   aria-label="編輯食物名稱"
+                   disabled={estimation === null} // Disable if no estimation yet
+               />
             </div>
             {/* Editable Calorie Estimate */}
             <div className="flex items-center justify-between">
-                 <Label htmlFor="est-calories" className="font-medium text-foreground flex items-center">
+                 <Label htmlFor="est-calories" className="font-medium text-foreground flex items-center shrink-0 pr-2">
                      <Edit size={12} className="mr-1 opacity-70"/> 估計卡路里：
                  </Label>
                   <Input
@@ -1054,9 +1161,10 @@ export default function CalorieLogger() {
                      type="number"
                      value={estimation?.calorieEstimate ?? ''}
                      onChange={(e) => handleEstimationCalorieChange(e.target.value)}
-                     className="font-semibold text-primary h-8 w-24 text-right"
+                     className="font-semibold text-primary h-8 w-24 text-right ml-auto" // Added ml-auto
                      aria-label="編輯估計卡路里"
                      disabled={estimation === null} // Disable if no estimation yet
+                     min="0"
                  />
             </div>
              {estimation?.isFoodItem && estimation?.confidence !== undefined && (
@@ -1283,7 +1391,9 @@ export default function CalorieLogger() {
                          }}
                          modifiersStyles={{
                              calorieLogged: { fontWeight: 'bold' },
-                             waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
+                              // Removed conflicting border style for waterLogged
+                             // waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
+                              waterLogged: { textDecoration: 'underline', textDecorationColor: 'hsl(var(--chart-2))', textDecorationThickness: '2px' }, // Use underline instead
                              selected: { // Style for selected date
                                 backgroundColor: 'hsl(var(--primary))',
                                 color: 'hsl(var(--primary-foreground))',
@@ -1310,7 +1420,8 @@ export default function CalorieLogger() {
                          }}
                          modifiersStyles={{
                              calorieLogged: { fontWeight: 'bold' },
-                             waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
+                             // waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
+                             waterLogged: { textDecoration: 'underline', textDecorationColor: 'hsl(var(--chart-2))', textDecorationThickness: '2px' }, // Use underline instead
                              selected: { // Style for selected date
                                 backgroundColor: 'hsl(var(--primary))',
                                 color: 'hsl(var(--primary-foreground))',
@@ -1659,6 +1770,11 @@ export default function CalorieLogger() {
                   <span className="text-muted-foreground truncate" title={userProfile.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : '未設定'}>
                       {userProfile.activityLevel ? activityLevelTranslations[userProfile.activityLevel] : '未設定'}
                   </span>
+
+                  <span className="font-medium text-foreground">健康目標：</span>
+                  <span className="text-muted-foreground">
+                       {userProfile.healthGoal ? healthGoalTranslations[userProfile.healthGoal] : '未設定'}
+                  </span>
              </div>
              <hr className="my-3 border-border" />
              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
@@ -1676,7 +1792,7 @@ export default function CalorieLogger() {
              </div>
         </CardContent>
         <CardFooter className="text-xs text-muted-foreground">
-             基礎代謝率 (BMR) 是您身體在休息時燃燒的卡路里數量。BMI 是體重指數。
+             基礎代謝率 (BMR) 是您身體在休息時燃燒的卡路里數量。BMI 是體重指數。建議卡路里會根據您的健康目標調整。
         </CardFooter>
     </Card>
 );
@@ -1832,7 +1948,7 @@ export default function CalorieLogger() {
         <DialogHeader>
           <DialogTitle>裁切影像</DialogTitle>
           <DialogDescription>
-            拖曳選框以裁切您的食物照片。留空以使用完整圖片。
+            拖曳選框以裁切您的食物照片。點擊「確認裁切」使用選取範圍，或直接點擊以使用完整圖片。
           </DialogDescription>
         </DialogHeader>
         {imageSrc && (
@@ -1859,14 +1975,6 @@ export default function CalorieLogger() {
             </div>
         )}
         <DialogFooter className="flex-col sm:flex-row gap-2">
-            {/* Button to toggle aspect ratio */}
-            {/* <Button
-                variant="outline"
-                onClick={() => setAspect(aspect ? undefined : 1)}
-                className="w-full sm:w-auto"
-            >
-                {aspect ? "自由裁切" : "鎖定比例 (1:1)"}
-            </Button> */}
            <Button variant="outline" onClick={() => setIsCropping(false)} className="w-full sm:w-auto">取消</Button>
            <Button onClick={handleCropConfirm} className="w-full sm:w-auto">確認裁切</Button>
         </DialogFooter>
@@ -1890,6 +1998,24 @@ export default function CalorieLogger() {
                      <AlertDescription>{profileError.message || '無法儲存個人資料變更。儲存空間可能已滿。'}</AlertDescription>
                  </Alert>
               )}
+             {/* Manual Input / Apple Health Toggle (Conceptual) */}
+             <RadioGroup defaultValue="manual" className="flex space-x-4 mb-4">
+                  <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="manual" id="profile-manual" disabled={!isClient} />
+                      <Label htmlFor="profile-manual">手動輸入</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="apple" id="profile-apple" disabled={!isClient} />
+                      <Label htmlFor="profile-apple" className="flex items-center gap-1">
+                          <Apple size={14}/> 連接 Apple 健康
+                      </Label>
+                  </div>
+             </RadioGroup>
+              <p className="text-xs text-muted-foreground mb-4">
+                  (Apple 健康整合即將推出。目前請使用手動輸入。)
+              </p>
+
+             {/* Form Fields */}
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Age */}
                  <div className="space-y-1">
@@ -1969,6 +2095,25 @@ export default function CalorieLogger() {
                          </SelectContent>
                      </Select>
                  </div>
+                  {/* Health Goal */}
+                 <div className="space-y-1 sm:col-span-2">
+                     <Label htmlFor="healthGoal" className="flex items-center gap-1"><Target size={14} /> 健康目標</Label>
+                     <Select
+                         value={userProfile.healthGoal || 'none'} // Use 'none' for null value
+                         onValueChange={(value) => handleProfileChange('healthGoal', value)}
+                         disabled={!isClient} // Disable on server
+                     >
+                         <SelectTrigger id="healthGoal" aria-label="選取健康目標">
+                             <SelectValue placeholder="選取您的健康目標" />
+                         </SelectTrigger>
+                         <SelectContent>
+                              <SelectItem value="none">-- 未設定 --</SelectItem>
+                             {Object.entries(healthGoalTranslations).map(([key, label]) => (
+                                <SelectItem key={key} value={key as HealthGoal}>{label}</SelectItem>
+                             ))}
+                         </SelectContent>
+                     </Select>
+                 </div>
              </div>
          </CardContent>
           <CardFooter className="text-xs text-muted-foreground">
@@ -2024,7 +2169,6 @@ export default function CalorieLogger() {
                  <Card className="mb-6 shadow-md">
                     <CardHeader>
                          <CardTitle className="flex items-center gap-2">
-                             {/* Changed text here */}
                              <Camera size={24} /> 點擊選擇上傳影像或拍攝照片
                          </CardTitle>
                         <CardDescription>使用您的相機拍攝食物照片，或從您的裝置上傳影像。</CardDescription>
@@ -2118,10 +2262,6 @@ export default function CalorieLogger() {
                  {renderProfileEditor()}
                  {renderProfileStats()} {/* Moved profile stats here */}
                  {renderNotificationSettingsTrigger()}
-                 {/* Apple Health Integration Button moved here */}
-                  <Button variant="outline" className="w-full mt-6" onClick={() => toast({ title: '尚未實作', description: 'Apple 健康整合即將推出！' })} disabled={!isClient}>
-                      <Apple className="mr-2 h-4 w-4" /> 連接 Apple 健康
-                  </Button>
              </TabsContent>
         </Tabs>
 
@@ -2132,4 +2272,3 @@ export default function CalorieLogger() {
     </Dialog>
   );
 }
-
