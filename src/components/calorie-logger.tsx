@@ -17,7 +17,7 @@ import {
   Edit,
   Trash2,
   Bell,
-  BarChart, // Re-added, might be needed later
+  // BarChart, // Removed as it's not used currently
   ZoomIn,
   X,
   UploadCloud,
@@ -32,6 +32,7 @@ import {
   Trash, // Added for deleting water entries
   Cat, // Added for achievement badge
   Trophy, // Added for achievement section title
+  Image as ImageIcon, // Added for photo achievement badge
 } from 'lucide-react';
 import {
   Tabs,
@@ -199,8 +200,6 @@ export default function CalorieLogger() {
   // Updated waterLog state to store individual entries per day
   const [waterLog, setWaterLog, waterLogError] = useLocalStorage<Record<string, WaterLogEntry[]>>('waterLog', {}); // { 'YYYY-MM-DD': [WaterLogEntry, ...] }
   const [notificationSettings, setNotificationSettings, notificationSettingsError] = useLocalStorage<NotificationSettings>('notificationSettings', defaultNotificationSettings);
-  // Removed showDetails state as it's not used anymore
-  // const [showDetails, setShowDetails] = useState<Record<string, boolean>>({});
   const [editingEntry, setEditingEntry] = useState<CalorieLogEntry | null>(null); // State for the entry being edited
   const [isEditing, setIsEditing] = useState(false); // State to control the edit dialog
   const [showImageModal, setShowImageModal] = useState<string | null>(null); // State to control the image zoom modal
@@ -631,12 +630,6 @@ export default function CalorieLogger() {
       }
   };
 
-  // Removed toggleDetails as it's not used anymore
-  // const toggleDetails = (id: string) => {
-  //   setShowDetails(prev => ({ ...prev, [id]: !prev[id] }));
-  // };
-
-
   const startEditing = (entry: CalorieLogEntry) => {
     setEditingEntry({ ...entry }); // Create a copy to edit
     setIsEditing(true);
@@ -1042,20 +1035,26 @@ export default function CalorieLogger() {
     });
  }, [calorieLog, selectedDate]);
 
- // Moved calculation outside renderLogList
- const loggedDays = useMemo(() => {
-    if (!isClient) return []; // Don't compute on server
-    const daysWithLogs = new Set<string>();
+ // Get dates with calorie logs for calendar highlighting
+ const calorieLoggedDays = useMemo(() => {
+    if (!isClient) return [];
+    const days = new Set<string>();
     calorieLog.forEach(entry => {
-        if (entry && entry.timestamp) {
+        if (entry?.timestamp) {
             const date = startOfDay(new Date(entry.timestamp));
-            if (isValidDate(date)) {
-                daysWithLogs.add(format(date, 'yyyy-MM-dd'));
-            }
+            if (isValidDate(date)) days.add(format(date, 'yyyy-MM-dd'));
         }
     });
-    return Array.from(daysWithLogs).map(dateStr => new Date(dateStr));
+    return Array.from(days).map(dateStr => new Date(dateStr));
  }, [calorieLog, isClient]);
+
+ // Get dates with water logs for calendar highlighting
+ const waterLoggedDays = useMemo(() => {
+    if (!isClient) return [];
+    return Object.keys(waterLog)
+        .filter(dateKey => waterLog[dateKey]?.length > 0)
+        .map(dateKey => new Date(dateKey));
+ }, [waterLog, isClient]);
 
 
  const renderStorageError = () => {
@@ -1126,19 +1125,23 @@ export default function CalorieLogger() {
             <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center gap-2"><CalendarDays size={24}/> 卡路里記錄摘要</h2>
 
             <div className="mb-6 flex justify-center">
-                <Calendar
-                   mode="single"
-                   selected={selectedDate}
-                   onSelect={setSelectedDate}
-                   className="rounded-md border shadow-sm"
-                   disabled={date => date > new Date() || date < new Date("1900-01-01")} // Disable future dates
-                   initialFocus
-                   locale={zhTW} // Use Traditional Chinese locale
-                   modifiers={{ logged: loggedDays }} // Add modifier for logged days
-                   modifiersStyles={{
-                       logged: { fontWeight: 'bold', color: 'hsl(var(--primary))' }, // Style for days with logs
-                   }}
-                />
+                 <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={setSelectedDate}
+                    className="rounded-md border shadow-sm"
+                    disabled={date => date > new Date() || date < new Date("1900-01-01")} // Disable future dates
+                    initialFocus
+                    locale={zhTW} // Use Traditional Chinese locale
+                    modifiers={{
+                        calorieLogged: calorieLoggedDays, // Days with calorie logs
+                        waterLogged: waterLoggedDays,   // Days with water logs
+                    }}
+                    modifiersStyles={{
+                        calorieLogged: { fontWeight: 'bold', color: 'hsl(var(--primary))' }, // Green for calorie logs
+                        waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' }, // Orange border for water logs
+                    }}
+                 />
             </div>
 
             {selectedDate && (
@@ -1296,12 +1299,24 @@ export default function CalorieLogger() {
     );
  };
 
- // New function to render the water summary and achievement card
- const renderWaterSummary = () => {
+ // --- Achievement Logic ---
+
+ // Check if photo was logged yesterday
+ const yesterdayPhotoLogged = useMemo(() => {
+    if (!isClient) return false;
+    const yesterdayDate = subDays(new Date(), 1);
+    return calorieLoggedDays.some(date => isSameDay(date, yesterdayDate));
+ }, [calorieLoggedDays, isClient]);
+
+ // --- End Achievement Logic ---
+
+
+ // New function to render the achievement summary tab content
+ const renderAchievementSummary = () => {
     const yesterdayKey = format(subDays(new Date(), 1), 'yyyy-MM-dd');
     const yesterdayTarget = calculateRecommendedWater({ ...userProfile, weight: userProfile.weight }) ?? defaultWaterTarget; // Recalculate target based on profile *at that time* might be complex, use current for simplicity
 
-    const getAchievementBadge = () => {
+    const getWaterAchievementBadge = () => {
         if (yesterdayWaterGoalMet) {
             return (
                 <div className="text-center">
@@ -1321,35 +1336,85 @@ export default function CalorieLogger() {
         }
     };
 
+     const getPhotoAchievementBadge = () => {
+         if (yesterdayPhotoLogged) {
+             return (
+                 <div className="text-center">
+                     <ImageIcon size={60} className="mx-auto text-green-500 drop-shadow-lg" />
+                     <p className="mt-2 font-semibold text-primary">拍照記錄貓！</p>
+                     <p className="text-xs text-muted-foreground">昨天有拍照記錄！</p>
+                 </div>
+             );
+         } else {
+             return (
+                 <div className="text-center">
+                     <ImageIcon size={60} className="mx-auto text-muted-foreground opacity-50" />
+                     <p className="mt-2 font-semibold text-muted-foreground">害羞拍照貓</p>
+                     <p className="text-xs text-muted-foreground">昨天沒有拍照記錄。</p>
+                 </div>
+             );
+         }
+     };
+
     return (
-        <Card className="mt-6 shadow-md">
-            <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                    <Trophy size={24} className="text-yellow-600" /> 飲水成就
-                </CardTitle>
-                <CardDescription>看看您昨天的喝水表現！</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 items-center">
-                    {/* Yesterday's Stats */}
-                    <div className="text-center border-r pr-4">
-                         <p className="text-xs text-muted-foreground">昨日 ({format(subDays(new Date(), 1), 'MM/dd')})</p>
-                        <p className="text-2xl font-bold text-blue-600">{yesterdayWaterIntake} <span className="text-sm font-normal">毫升</span></p>
-                        <p className="text-xs text-muted-foreground">目標：{yesterdayTarget} 毫升</p>
-                        <Progress
-                           value={yesterdayTarget > 0 ? Math.min((yesterdayWaterIntake / yesterdayTarget) * 100, 100) : 0}
-                           className="h-2 mt-2"
-                           aria-label={`昨日飲水進度 ${Math.round(yesterdayTarget > 0 ? (yesterdayWaterIntake / yesterdayTarget) * 100 : 0)}%`}
-                        />
+        <>
+            {/* Water Achievement Card */}
+            <Card className="mt-6 shadow-md">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Trophy size={24} className="text-yellow-600" /> 飲水成就
+                    </CardTitle>
+                    <CardDescription>看看您昨天的喝水表現！</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4 items-center">
+                        {/* Yesterday's Water Stats */}
+                        <div className="text-center border-r pr-4">
+                             <p className="text-xs text-muted-foreground">昨日 ({format(subDays(new Date(), 1), 'MM/dd')})</p>
+                            <p className="text-2xl font-bold text-blue-600">{yesterdayWaterIntake} <span className="text-sm font-normal">毫升</span></p>
+                            <p className="text-xs text-muted-foreground">目標：{yesterdayTarget} 毫升</p>
+                            <Progress
+                               value={yesterdayTarget > 0 ? Math.min((yesterdayWaterIntake / yesterdayTarget) * 100, 100) : 0}
+                               className="h-2 mt-2"
+                               aria-label={`昨日飲水進度 ${Math.round(yesterdayTarget > 0 ? (yesterdayWaterIntake / yesterdayTarget) * 100 : 0)}%`}
+                            />
+                        </div>
+                        {/* Water Achievement Badge */}
+                        {getWaterAchievementBadge()}
                     </div>
-                    {/* Achievement Badge */}
-                    {getAchievementBadge()}
-                </div>
-            </CardContent>
-             <CardFooter className="text-xs text-muted-foreground">
-                 持續追蹤，養成喝水好習慣！ <Cat size={14} className="inline-block ml-1 text-primary" />
-             </CardFooter>
-        </Card>
+                </CardContent>
+                 <CardFooter className="text-xs text-muted-foreground">
+                     持續追蹤，養成喝水好習慣！ <Cat size={14} className="inline-block ml-1 text-primary" />
+                 </CardFooter>
+            </Card>
+
+             {/* Photo Logging Achievement Card */}
+             <Card className="mt-6 shadow-md">
+                 <CardHeader>
+                     <CardTitle className="flex items-center gap-2">
+                         <ImageIcon size={24} className="text-green-600" /> 拍照記錄成就
+                     </CardTitle>
+                     <CardDescription>看看您昨天的拍照記錄習慣！</CardDescription>
+                 </CardHeader>
+                 <CardContent>
+                      <div className="grid grid-cols-2 gap-4 items-center">
+                         {/* Yesterday's Photo Log Status */}
+                         <div className="text-center border-r pr-4">
+                             <p className="text-xs text-muted-foreground">昨日 ({format(subDays(new Date(), 1), 'MM/dd')})</p>
+                              <p className={`text-2xl font-bold ${yesterdayPhotoLogged ? 'text-green-600' : 'text-muted-foreground'}`}>
+                                 {yesterdayPhotoLogged ? '已記錄' : '未記錄'}
+                              </p>
+                              <p className="text-xs text-muted-foreground">目標：每日記錄</p>
+                         </div>
+                         {/* Photo Achievement Badge */}
+                         {getPhotoAchievementBadge()}
+                      </div>
+                 </CardContent>
+                 <CardFooter className="text-xs text-muted-foreground">
+                     拍照記錄您的飲食，讓追蹤更輕鬆！ <Cat size={14} className="inline-block ml-1 text-primary" />
+                 </CardFooter>
+             </Card>
+        </>
     );
  };
 
@@ -1740,10 +1805,10 @@ export default function CalorieLogger() {
                      <span className="truncate hidden sm:inline">飲水追蹤</span>
                      <span className="truncate sm:hidden">飲水</span>
                  </TabsTrigger>
-                 {/* New Tab for Water Summary */}
-                 <TabsTrigger value="summary" className="flex-1 text-center px-1">
+                 {/* New Tab for Achievements */}
+                 <TabsTrigger value="achievements" className="flex-1 text-center px-1"> {/* Changed value to "achievements" */}
                      <Trophy className="mr-1 sm:mr-2 h-4 w-4 inline-block text-yellow-600" />
-                     <span className="truncate hidden sm:inline">飲水成就</span>
+                     <span className="truncate hidden sm:inline">每日成就</span> {/* Updated label */}
                      <span className="truncate sm:hidden">成就</span>
                  </TabsTrigger>
                  <TabsTrigger value="settings" className="flex-1 text-center px-1">
@@ -1840,21 +1905,18 @@ export default function CalorieLogger() {
              {/* Tab 2: Water Tracking */}
             <TabsContent value="tracking" className="pt-4">
                 {renderWaterTracker()}
-                 {/* Removed profile stats from this tab */}
-                 {/* {renderProfileStats()} */}
             </TabsContent>
 
-            {/* Tab 3: Water Summary */}
-            <TabsContent value="summary" className="pt-4">
-                 {renderWaterSummary()}
-                 {/* You might add other summaries here, e.g., calorie summary */}
+            {/* Tab 3: Achievements */}
+            <TabsContent value="achievements" className="pt-4"> {/* Changed value to "achievements" */}
+                 {renderAchievementSummary()}
             </TabsContent>
 
              {/* Tab 4: Settings */}
              <TabsContent value="settings" className="pt-4">
                  {renderProfileEditor()}
+                 {renderProfileStats()} {/* Moved profile stats here */}
                  {renderNotificationSettingsTrigger()}
-                 {/* Add other settings components here if needed */}
              </TabsContent>
         </Tabs>
 
