@@ -86,7 +86,7 @@ import {
 import { useAuth } from '@/context/auth-context'; // Import useAuth hook
 import { LoginButton } from '@/components/login-button'; // Import LoginButton
 import { UserProfileDisplay } from '@/components/user-profile-display'; // Import UserProfileDisplay
-import { collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, doc, orderBy, limit, onSnapshot, Timestamp, writeBatch } from 'firebase/firestore'; // Firestore imports
+import { collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, doc, orderBy, limit, onSnapshot, Timestamp, writeBatch, setDoc } from 'firebase/firestore'; // Firestore imports
 import { db } from '@/lib/firebase/config'; // Import db instance
 
 
@@ -1512,6 +1512,14 @@ export default function CalorieLogger() {
  }, [waterLog, isClient]);
 
 
+ // Calculate water entries for the selected date - moved outside renderWaterTracker
+ const selectedDateEntries = useMemo(() => {
+    if (!isClient || !selectedDate) return [];
+    const dateKey = format(selectedDate, 'yyyy-MM-dd');
+    return waterLog[dateKey] || [];
+ }, [waterLog, selectedDate, isClient]);
+
+
  const renderStorageError = () => {
     if (!isClient) return null; // Only render errors on client
 
@@ -1768,14 +1776,7 @@ export default function CalorieLogger() {
 
 
  const renderWaterTracker = () => {
-      // Get water entries for the selected date
-     const selectedDateEntries = useMemo(() => {
-         if (!isClient || !selectedDate) return [];
-         const dateKey = format(selectedDate, 'yyyy-MM-dd');
-         return waterLog[dateKey] || [];
-     }, [waterLog, selectedDate, isClient]);
-
-     // Show skeleton if profile is loading
+      // Show skeleton if profile is loading
      if (dbLoading || authLoading) {
          return <Skeleton className="h-64 w-full mt-6" />;
      }
