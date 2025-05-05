@@ -27,7 +27,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-Hant" className="h-full"> {/* Set language and full height */}
+    <html lang="zh-Hant" className="h-full">{/* Remove whitespace around body */}
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased h-full`}> {/* Full height */}
         <AuthProvider> {/* Wrap children with AuthProvider */}
           {children}
