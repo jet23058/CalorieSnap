@@ -1,3 +1,4 @@
+
 import CalorieLogger from '@/components/calorie-logger';
 
 export default function Home() {

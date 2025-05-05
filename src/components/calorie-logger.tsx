@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import React, {
@@ -83,7 +82,12 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip" // Import Tooltip components
+} from "@/components/ui/tooltip"; // Import Tooltip components
+import { useAuth } from '@/context/auth-context'; // Import useAuth hook
+import { LoginButton } from '@/components/login-button'; // Import LoginButton
+import { UserProfileDisplay } from '@/components/user-profile-display'; // Import UserProfileDisplay
+import { collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, doc, orderBy, limit, onSnapshot, Timestamp, writeBatch } from 'firebase/firestore'; // Firestore imports
+import { db } from '@/lib/firebase/config'; // Import db instance
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -91,13 +95,14 @@ type LogViewMode = 'daily' | 'monthly';
 type MonthlySortCriteria = 'time-desc' | 'time-asc' | 'calories-desc' | 'calories-asc';
 type HealthGoal = 'muscleGain' | 'fatLoss' | 'maintenance'; // New type for health goals
 
-
+// Update CalorieLogEntry to store Firestore document ID
 export interface CalorieLogEntry {
-  id: string; // Unique ID for each entry
+  id: string; // Firestore document ID
+  userId: string; // Added userId field
   foodItem: string;
   calorieEstimate: number;
   imageUrl: string | null; // Can be null if no image or during loading
-  timestamp: string; // ISO string format (UTC recommended)
+  timestamp: Timestamp; // Use Firestore Timestamp
   mealType: MealType | null;
   location: string | null;
   cost: number | null; // Changed to number | null
@@ -106,14 +111,17 @@ export interface CalorieLogEntry {
   nutritionistComment?: string; // Placeholder for nutritionist comments
 }
 
-// New interface for individual water log entries
+// Update WaterLogEntry to store Firestore document ID
 export interface WaterLogEntry {
-    id: string;
-    timestamp: string; // ISO string format
+    id: string; // Firestore document ID
+    userId: string; // Added userId field
+    timestamp: Timestamp; // Use Firestore Timestamp
     amount: number; // in ml
 }
 
+// Update UserProfile to store Firestore document ID and sync with Firestore
 export interface UserProfile {
+  id: string; // Firestore document ID (usually the same as auth uid)
   age: number | null;
   gender: 'male' | 'female' | 'other' | null;
   height: number | null; // cm
@@ -154,8 +162,8 @@ const healthGoalTranslations: Record<HealthGoal, string> = {
   maintenance: "維持",
 };
 
-// Default User Profile
-const defaultUserProfile: UserProfile = {
+// Default User Profile (without ID initially)
+const defaultUserProfile: Omit<UserProfile, 'id'> = {
   age: null,
   gender: null,
   height: null,
@@ -165,7 +173,7 @@ const defaultUserProfile: UserProfile = {
 };
 
 // Helper function to calculate BMR (Harris-Benedict Equation)
-const calculateBMR = (profile: UserProfile): number | null => {
+const calculateBMR = (profile: Partial<UserProfile>): number | null => { // Allow partial profile
   if (!profile.weight || !profile.height || !profile.age || !profile.gender) {
     return null;
   }
@@ -181,7 +189,7 @@ const calculateBMR = (profile: UserProfile): number | null => {
 
 // Helper function to calculate Daily Calorie Needs (BMR * Activity Level)
 // Adjust based on health goal (simple example: +- 300 kcal)
-const calculateDailyCalories = (profile: UserProfile): number | null => {
+const calculateDailyCalories = (profile: Partial<UserProfile>): number | null => { // Allow partial profile
   const bmr = calculateBMR(profile);
   if (!bmr || !profile.activityLevel) {
     return null;
@@ -207,7 +215,7 @@ const calculateDailyCalories = (profile: UserProfile): number | null => {
 };
 
 // Helper function to calculate BMI
-const calculateBMI = (profile: UserProfile): number | null => {
+const calculateBMI = (profile: Partial<UserProfile>): number | null => { // Allow partial profile
   if (!profile.weight || !profile.height) {
     return null;
   }
@@ -217,7 +225,7 @@ const calculateBMI = (profile: UserProfile): number | null => {
 
 // Helper function to calculate Recommended Water Intake (simple version)
 // Example: 35ml per kg of body weight (adjust as needed)
-const calculateRecommendedWater = (profile: UserProfile): number | null => {
+const calculateRecommendedWater = (profile: Partial<UserProfile>): number | null => { // Allow partial profile
     if (!profile.weight) return null; // Return null if no weight
     return Math.round(profile.weight * 35);
 };
@@ -228,9 +236,10 @@ const getCurrentDate = (): string => {
 };
 
 // Helper function to format ISO string to YYYY-MM-DDTHH:mm for local time input
-function formatISOToLocalDateTimeString(isoString: string): string {
+function formatTimestampToLocalDateTimeString(timestamp: Timestamp | undefined): string {
+    if (!timestamp) return '';
     try {
-        const date = new Date(isoString);
+        const date = timestamp.toDate(); // Convert Firestore Timestamp to JS Date
         if (!isValidDate(date)) return ''; // Return empty string if invalid date
 
         const year = date.getFullYear();
@@ -241,26 +250,46 @@ function formatISOToLocalDateTimeString(isoString: string): string {
 
         return `${year}-${month}-${day}T${hours}:${minutes}`;
     } catch (e) {
-        console.error("Error formatting ISO string to local datetime:", e);
+        console.error("Error formatting Timestamp to local datetime:", e);
         return '';
+    }
+}
+
+// Helper function to convert local datetime string to Firestore Timestamp
+function convertLocalDateTimeStringToTimestamp(localDateTimeString: string): Timestamp | null {
+    try {
+        const date = new Date(localDateTimeString);
+        if (!isValidDate(date)) return null;
+        return Timestamp.fromDate(date); // Convert JS Date to Firestore Timestamp
+    } catch (e) {
+        console.error("Error converting local datetime string to Timestamp:", e);
+        return null;
     }
 }
 
 
 export default function CalorieLogger() {
+  const { user, loading: authLoading } = useAuth(); // Get user and auth loading state
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [estimation, setEstimation] = useState<EstimateCalorieCountOutput | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false); // General loading state for AI/DB operations
+  const [error, setError] = useState<string | null>(null); // General error state
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
-  const [calorieLog, setCalorieLog, logError] = useLocalStorage<CalorieLogEntry[]>('calorieLog', []);
-  const [userProfile, setUserProfile, profileError] = useLocalStorage<UserProfile>('userProfile', defaultUserProfile);
-  // Updated waterLog state to store individual entries per day
-  const [waterLog, setWaterLog, waterLogError] = useLocalStorage<Record<string, WaterLogEntry[]>>('waterLog', {}); // { 'YYYY-MM-DD': [WaterLogEntry, ...] }
-  const [notificationSettings, setNotificationSettings, notificationSettingsError] = useLocalStorage<NotificationSettings>('notificationSettings', defaultNotificationSettings);
+
+  // --- Remove useLocalStorage, replace with Firestore state ---
+  // const [calorieLog, setCalorieLog, logError] = useLocalStorage<CalorieLogEntry[]>('calorieLog', []);
+  // const [userProfile, setUserProfile, profileError] = useLocalStorage<UserProfile>('userProfile', defaultUserProfile);
+  // const [waterLog, setWaterLog, waterLogError] = useLocalStorage<Record<string, WaterLogEntry[]>>('waterLog', {});
+  const [calorieLog, setCalorieLog] = useState<CalorieLogEntry[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [waterLog, setWaterLog] = useState<Record<string, WaterLogEntry[]>>({}); // Keep structure for daily aggregation
+  const [dbLoading, setDbLoading] = useState(true); // Loading state for Firestore data
+  const [dbError, setDbError] = useState<string | null>(null); // Error state for Firestore operations
+
+  const [notificationSettings, setNotificationSettings, notificationSettingsError] = useLocalStorage<NotificationSettings>('notificationSettings', defaultNotificationSettings); // Keep for browser notifications
   const [editingEntry, setEditingEntry] = useState<CalorieLogEntry | null>(null); // State for the entry being edited
   const [isEditing, setIsEditing] = useState(false); // State to control the edit dialog
   const [showImageModal, setShowImageModal] = useState<string | null>(null); // State to control the image zoom modal
@@ -278,12 +307,111 @@ export default function CalorieLogger() {
   const [monthlySortCriteria, setMonthlySortCriteria] = useState<MonthlySortCriteria>('time-desc'); // State for monthly sorting
   const [activeTab, setActiveTab] = useState('logging'); // State for currently active tab
 
-
   const { toast } = useToast();
 
   useEffect(() => {
     setIsClient(true); // Set client to true once component mounts
   }, []);
+
+   // --- Firestore Data Fetching and Realtime Updates ---
+   useEffect(() => {
+    if (!user) {
+      // Clear local state if user logs out
+      setCalorieLog([]);
+      setUserProfile(null);
+      setWaterLog({});
+      setDbLoading(false);
+      setDbError(null);
+      return;
+    }
+
+    setDbLoading(true);
+    setDbError(null);
+    const userId = user.uid;
+
+    // Fetch User Profile
+    const profileRef = doc(db, 'users', userId);
+    const unsubscribeProfile = onSnapshot(profileRef, (docSnap) => {
+        if (docSnap.exists()) {
+            setUserProfile({ id: docSnap.id, ...docSnap.data() } as UserProfile);
+        } else {
+            // User profile doesn't exist in Firestore yet, create it with defaults
+            console.log("User profile not found, creating...");
+            setDoc(profileRef, { ...defaultUserProfile, /* any other fields from auth user */ }, { merge: true })
+                .then(() => setUserProfile({ id: userId, ...defaultUserProfile }))
+                .catch(err => {
+                    console.error("Error creating user profile:", err);
+                    setDbError("無法建立使用者個人資料。");
+                });
+        }
+         setDbLoading(false); // Profile loading finished (or creation attempted)
+    }, (error) => {
+        console.error("Error fetching user profile:", error);
+        setDbError("無法載入使用者個人資料。");
+        setDbLoading(false);
+    });
+
+    // Fetch Calorie Logs (Order by timestamp descending, limit for performance?)
+    const calorieQuery = query(
+      collection(db, 'calorieEntries'),
+      where('userId', '==', userId),
+      orderBy('timestamp', 'desc')
+      // limit(100) // Consider limiting initial load
+    );
+    const unsubscribeCalorie = onSnapshot(calorieQuery, (querySnapshot) => {
+      const logs: CalorieLogEntry[] = [];
+      querySnapshot.forEach((doc) => {
+        logs.push({ id: doc.id, ...doc.data() } as CalorieLogEntry);
+      });
+      setCalorieLog(logs);
+       // setDbLoading(false); // Calorie loading finished
+    }, (error) => {
+      console.error("Error fetching calorie logs:", error);
+      setDbError("無法載入卡路里記錄。");
+      // setDbLoading(false);
+    });
+
+    // Fetch Water Logs (Fetch all for the user, aggregation happens in useMemo)
+    const waterQuery = query(
+      collection(db, 'waterEntries'),
+      where('userId', '==', userId)
+      // No ordering needed here as we aggregate by date client-side
+    );
+    const unsubscribeWater = onSnapshot(waterQuery, (querySnapshot) => {
+        const waterEntries: WaterLogEntry[] = [];
+        querySnapshot.forEach((doc) => {
+            waterEntries.push({ id: doc.id, ...doc.data() } as WaterLogEntry);
+        });
+
+        // Aggregate water entries by date
+        const aggregatedWaterLog: Record<string, WaterLogEntry[]> = {};
+        waterEntries.forEach(entry => {
+            if (entry.timestamp) {
+                const dateKey = format(entry.timestamp.toDate(), 'yyyy-MM-dd');
+                if (!aggregatedWaterLog[dateKey]) {
+                    aggregatedWaterLog[dateKey] = [];
+                }
+                aggregatedWaterLog[dateKey].push(entry);
+            }
+        });
+        setWaterLog(aggregatedWaterLog);
+         // setDbLoading(false); // Water loading finished (or handled by profile loading)
+    }, (error) => {
+        console.error("Error fetching water logs:", error);
+        setDbError("無法載入飲水記錄。");
+        // setDbLoading(false);
+    });
+
+
+    // Cleanup Firestore listeners on unmount or user change
+    return () => {
+      unsubscribeProfile();
+      unsubscribeCalorie();
+      unsubscribeWater();
+    };
+  }, [user]); // Rerun effect when user changes
+
+  // --- End Firestore Data Fetching ---
 
 
   const fetchCurrentLocation = useCallback(() => {
@@ -647,11 +775,11 @@ export default function CalorieLogger() {
   };
 
 
-  // --- Logging Logic ---
+  // --- Logging Logic (Firestore) ---
 
   // Updated placeholder function for nutritionist comment, considering health goals
   const getNutritionistComment = (
-      entry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'>,
+      entry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment' | 'userId' | 'timestamp'> & { timestamp: Date }, // Use JS Date for temp calculations
       goal: HealthGoal | null
   ): string => {
       let comment = '';
@@ -698,61 +826,57 @@ export default function CalorieLogger() {
   };
 
 
-  const logCalories = () => {
+ const logCalories = async () => {
+    if (!user) {
+        toast({ variant: 'destructive', title: "未登入", description: "請先登入以記錄卡路里。" });
+        return;
+    }
+    if (!imageSrc) {
+        toast({ variant: 'destructive', title: "記錄失敗", description: "沒有影像可記錄。" });
+        return;
+    }
+
+    setIsLoading(true); // Indicate database operation
+    setDbError(null);
+
     // Allow logging even if only imageSrc exists (before estimation finishes or if it fails)
-    if (imageSrc) {
-        const currentEstimation = estimation; // Capture current estimation state
-        // Fetch location *just before* logging, if not already available or errored
-        let locationToLog = currentLocation;
-        if (!locationToLog || locationToLog === '正在獲取...' || locationToLog.startsWith('無法') || locationToLog.startsWith('瀏覽器')) {
-            if (!isFetchingLocation) { // Avoid concurrent fetches
-                fetchCurrentLocation(); // Fetch it now
-                // Note: This is async, so the location might not be available immediately for *this* log entry.
-                // We might need to update the entry later or accept it might be null.
-                // For simplicity here, we log the current state, which might be null or an error message.
-                locationToLog = currentLocation; // Use the state as is for this log
-            }
+    const currentEstimation = estimation; // Capture current estimation state
+    let locationToLog = currentLocation;
+    if (!locationToLog || locationToLog === '正在獲取...' || locationToLog.startsWith('無法') || locationToLog.startsWith('瀏覽器')) {
+        if (!isFetchingLocation) {
+            fetchCurrentLocation();
+            locationToLog = currentLocation;
         }
+    }
 
+    const entryTime = new Date(); // Use current time for the log entry
+    const baseEntryData = {
+        foodItem: currentEstimation?.foodItem || "未命名食物",
+        calorieEstimate: currentEstimation?.isFoodItem ? (currentEstimation.calorieEstimate ?? 0) : 0,
+        imageUrl: imageSrc, // Store the Data URL directly (or upload to Firebase Storage and store URL)
+        timestamp: entryTime, // JS Date for comment generation
+        mealType: null,
+        location: locationToLog && locationToLog !== '正在獲取...' && !locationToLog.startsWith('無法') && !locationToLog.startsWith('瀏覽器') ? locationToLog : null,
+        cost: null,
+        confidence: currentEstimation?.isFoodItem ? (currentEstimation.confidence ?? 0) : 0,
+    };
 
-        const baseEntry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'> = {
-            foodItem: currentEstimation?.foodItem || "未命名食物", // Use default placeholder
-            calorieEstimate: currentEstimation?.isFoodItem ? (currentEstimation.calorieEstimate ?? 0) : 0, // Use 0 if not food or undefined
-            imageUrl: imageSrc, // Log the (potentially cropped) image
-            timestamp: new Date().toISOString(),
-            mealType: null, // User can set this later
-            location: locationToLog && locationToLog !== '正在獲取...' && !locationToLog.startsWith('無法') && !locationToLog.startsWith('瀏覽器') ? locationToLog : null, // Log location if available and not an error/loading state
-            cost: null,
-            confidence: currentEstimation?.isFoodItem ? (currentEstimation.confidence ?? 0) : 0, // Use 0 if not food or undefined
-        };
+    const nutritionistComment = getNutritionistComment(baseEntryData, userProfile?.healthGoal ?? null);
 
-         // Generate nutritionist comment based on the entry details and user's goal
-        const nutritionistComment = getNutritionistComment(baseEntry, userProfile.healthGoal);
+    const newEntryData = {
+        userId: user.uid, // Add user ID
+        ...baseEntryData,
+        timestamp: Timestamp.fromDate(entryTime), // Convert to Firestore Timestamp for storage
+        nutritionistComment: nutritionistComment,
+    };
 
-        const newEntry: CalorieLogEntry = {
-            ...baseEntry,
-            id: Date.now().toString(), // Simple unique ID
-            nutritionistComment: nutritionistComment, // Add the generated comment
-        };
-
-
-      try {
-        // Use the setter function from useLocalStorage
-        setCalorieLog(prevLog => {
-            // Basic check to prevent excessively large logs
-            if (prevLog.length >= 1000) { // Example limit: 1000 entries
-                // Optionally remove the oldest entry
-                 // return [newEntry, ...prevLog.slice(0, -1)];
-                 toast({ variant: 'destructive', title: '記錄已滿', description: '記錄數量已達上限，請刪除一些舊記錄。' });
-                 return prevLog; // Prevent adding new entry
-            }
-            return [newEntry, ...prevLog];
-        });
-
+    try {
+        const docRef = await addDoc(collection(db, 'calorieEntries'), newEntryData);
+        console.log("Calorie entry written with ID: ", docRef.id);
 
         toast({
           title: "記錄成功",
-          description: `${newEntry.foodItem} (${Math.round(newEntry.calorieEstimate)} 卡) 已新增至您的記錄。`,
+          description: `${newEntryData.foodItem} (${Math.round(newEntryData.calorieEstimate)} 卡) 已新增至您的記錄。`,
         });
 
         // Clear image and estimation after successful logging
@@ -762,32 +886,19 @@ export default function CalorieLogger() {
         if (fileInputRef.current) {
           fileInputRef.current.value = ""; // Reset file input
         }
-      } catch (storageError: any) {
-         // Handle errors from useLocalStorage setter directly
-         // (useLocalStorage hook now passes the error back instead of throwing)
-         if (storageError instanceof LocalStorageError) {
-             toast({
-                 variant: 'destructive',
-                 title: '儲存錯誤',
-                 description: storageError.message || '儲存卡路里記錄時發生未預期的錯誤。'
-             });
-         } else {
-             toast({
-                 variant: 'destructive',
-                 title: '儲存錯誤',
-                 description: '儲存卡路里記錄時發生未預期的錯誤。'
-             });
-         }
-         console.error("儲存記錄時發生錯誤:", storageError);
-      }
-    } else {
-      toast({
-        variant: 'destructive',
-        title: "記錄失敗",
-        description: "沒有影像可記錄。",
-      });
+    } catch (dbError: any) {
+        console.error("寫入 Firestore 時發生錯誤:", dbError);
+        setDbError("儲存卡路里記錄時發生錯誤。");
+        toast({
+            variant: 'destructive',
+            title: '儲存錯誤',
+            description: '儲存卡路里記錄時發生未預期的錯誤。'
+        });
+    } finally {
+        setIsLoading(false);
     }
-  };
+};
+
 
   // Allow editing calorie estimate in the estimation result card
   const handleEstimationCalorieChange = (value: string) => {
@@ -817,21 +928,16 @@ export default function CalorieLogger() {
                 processedValue = null; // Ensure it's null if not a valid number
             }
         }
-        // Handle timestamp: convert local input string to ISO string (UTC)
+        // Handle timestamp: convert local input string to Firestore Timestamp
         else if (field === 'timestamp' && typeof value === 'string') {
-            try {
-                const date = new Date(value); // This parses the local time string
-                if (isValidDate(date)) {
-                    processedValue = date.toISOString(); // Convert to ISO string (UTC)
-                } else {
-                    // Keep original timestamp if input is invalid
-                    processedValue = editingEntry.timestamp;
-                    toast({ variant: 'destructive', title: '無效日期', description: '請輸入有效的日期和時間。' });
-                }
-            } catch (e) {
+            const newTimestamp = convertLocalDateTimeStringToTimestamp(value);
+            if (newTimestamp) {
+                 processedValue = newTimestamp;
+             } else {
+                 // Keep original timestamp if input is invalid
                  processedValue = editingEntry.timestamp;
-                 toast({ variant: 'destructive', title: '日期轉換錯誤', description: '無法處理輸入的日期。' });
-            }
+                 toast({ variant: 'destructive', title: '無效日期', description: '請輸入有效的日期和時間。' });
+             }
         }
         // Handle meal type selection where "none" means null
         else if (field === 'mealType' && value === 'none') {
@@ -843,248 +949,251 @@ export default function CalorieLogger() {
 };
 
 
-  const saveEdit = () => {
-    if (editingEntry) {
-      try {
-         // Re-generate nutritionist comment if relevant fields changed
-         const baseEntry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'> = { ...editingEntry };
-         const updatedComment = getNutritionistComment(baseEntry, userProfile.healthGoal); // Pass goal
-         const finalEntry = { ...editingEntry, nutritionistComment: updatedComment };
+ const saveEdit = async () => {
+    if (!editingEntry || !user) {
+        toast({ variant: 'destructive', title: "錯誤", description: "找不到要更新的記錄或未登入。" });
+        return;
+    }
 
+    setIsLoading(true);
+    setDbError(null);
 
-        setCalorieLog(prevLog =>
-            prevLog.map(entry =>
-                entry.id === finalEntry.id ? finalEntry : entry
-            )
-        );
+    try {
+        // Re-generate nutritionist comment if relevant fields changed
+        const baseEntryData = {
+            ...editingEntry,
+            timestamp: editingEntry.timestamp.toDate(), // Convert Timestamp to Date for comment generation
+        };
+         // Explicitly exclude Firestore ID, userId and nutritionistComment
+         const { id, userId, nutritionistComment: _, ...commentInputData } = baseEntryData;
+
+         const updatedComment = getNutritionistComment(commentInputData, userProfile?.healthGoal ?? null); // Pass goal
+         const finalEntryData = { ...editingEntry, nutritionistComment: updatedComment };
+
+        // Remove the id field before updating Firestore, as it's the document ID
+        const { id: docId, ...dataToUpdate } = finalEntryData;
+
+        const entryRef = doc(db, 'calorieEntries', docId);
+        await updateDoc(entryRef, dataToUpdate);
+
         toast({ title: "更新成功", description: "記錄項目已更新。" });
         setIsEditing(false);
         setEditingEntry(null);
-      } catch (storageError: any) {
-         // Handle potential errors from the setter
-         if (storageError instanceof LocalStorageError) {
-             toast({
-                 variant: 'destructive',
-                 title: '儲存錯誤',
-                 description: storageError.message || '儲存更新時發生未預期的錯誤。'
-             });
-         } else {
-             toast({
-                 variant: 'destructive',
-                 title: '儲存錯誤',
-                 description: '儲存更新時發生未預期的錯誤。'
-             });
-         }
-         console.error("儲存編輯時發生錯誤:", storageError);
-      }
+    } catch (dbError: any) {
+        console.error("更新 Firestore 時發生錯誤:", dbError);
+        setDbError("更新記錄項目時發生錯誤。");
+        toast({
+            variant: 'destructive',
+            title: '更新錯誤',
+            description: '儲存更新時發生未預期的錯誤。'
+        });
+    } finally {
+        setIsLoading(false);
     }
-  };
+};
 
 
-  const deleteLogEntry = (id: string) => {
-      try {
-         setCalorieLog(prevLog => prevLog.filter(entry => entry.id !== id));
+ const deleteLogEntry = async (id: string) => {
+     if (!user) return; // Should not happen if button is visible only when logged in
+     setIsLoading(true);
+     setDbError(null);
+
+     try {
+         const entryRef = doc(db, 'calorieEntries', id);
+         await deleteDoc(entryRef);
          toast({ title: "刪除成功", description: "記錄項目已刪除。" });
-      } catch (storageError: any) {
-           // Handle potential errors from the setter
-           if (storageError instanceof LocalStorageError) {
-               toast({
-                   variant: 'destructive',
-                   title: '刪除錯誤',
-                   description: storageError.message || '刪除項目時發生未預期的錯誤。'
-               });
-           } else {
-                 toast({
-                     variant: 'destructive',
-                     title: '刪除錯誤',
-                     description: '刪除項目時發生未預期的錯誤。'
-                 });
-           }
-           console.error("刪除記錄項目時發生錯誤:", storageError);
-      }
-  };
+         // Local state will update via Firestore listener
+     } catch (dbError: any) {
+         console.error("刪除 Firestore 文件時發生錯誤:", dbError);
+         setDbError("刪除記錄項目時發生錯誤。");
+         toast({
+             variant: 'destructive',
+             title: '刪除錯誤',
+             description: '刪除項目時發生未預期的錯誤。'
+         });
+     } finally {
+         setIsLoading(false);
+     }
+ };
 
 
-  // --- Profile Handling ---
+  // --- Profile Handling (Firestore) ---
 
-  const handleProfileChange = (field: keyof UserProfile, value: any) => {
-      // Prevent updates on server
-      if (!isClient) return;
+  const handleProfileChange = async (field: keyof Omit<UserProfile, 'id'>, value: any) => {
+      if (!isClient || !user || !userProfile) return; // Only update on client when logged in and profile loaded
 
       let processedValue = value;
       // Ensure numeric fields are stored as numbers or null
       if (field === 'age' || field === 'height' || field === 'weight') {
           processedValue = value === '' ? null : Number(value);
-          if (isNaN(processedValue as number) || processedValue <= 0) { // Add check for non-positive numbers
-              processedValue = null; // Handle invalid or non-positive number input
+          if (isNaN(processedValue as number) || (processedValue !== null && processedValue <= 0)) { // Allow null, but not non-positive numbers
+              processedValue = null;
               toast({ variant: 'destructive', title: '無效輸入', description: `${field === 'age' ? '年齡' : field === 'height' ? '身高' : '體重'} 必須是正數。` });
+              return; // Prevent update if invalid number
           }
       }
       // Ensure activityLevel is one of the valid keys or null
       if (field === 'activityLevel') {
-         if (value === 'none') {
+         if (value === 'none' || value === null) {
              processedValue = null;
-         } else if (value !== null && !(value in activityLevelMultipliers)) {
-              processedValue = userProfile.activityLevel; // Keep previous value if invalid selection
+         } else if (!(value in activityLevelMultipliers)) {
+              toast({ variant: 'destructive', title: '無效輸入', description: '請選取有效的活動水平。' });
+              return; // Prevent update
          }
       }
       // Ensure gender is one of the valid options or null
       if (field === 'gender') {
-          if (value === 'none') {
+          if (value === 'none' || value === null) {
               processedValue = null;
-          } else if (value !== null && !['male', 'female', 'other'].includes(value)) {
-             processedValue = userProfile.gender; // Keep previous value
+          } else if (!['male', 'female', 'other'].includes(value)) {
+             toast({ variant: 'destructive', title: '無效輸入', description: '請選取有效的生理性別。' });
+             return; // Prevent update
           }
       }
        // Ensure healthGoal is one of the valid options or null
       if (field === 'healthGoal') {
-         if (value === 'none') {
+         if (value === 'none' || value === null) {
              processedValue = null;
-         } else if (value !== null && !['muscleGain', 'fatLoss', 'maintenance'].includes(value)) {
-             processedValue = userProfile.healthGoal; // Keep previous value
+         } else if (!['muscleGain', 'fatLoss', 'maintenance'].includes(value)) {
+             toast({ variant: 'destructive', title: '無效輸入', description: '請選取有效的健康目標。' });
+             return; // Prevent update
          }
       }
 
+       // Optimistically update local state for responsiveness
+       setUserProfile(prev => prev ? { ...prev, [field]: processedValue } : null);
+       setDbError(null); // Clear previous DB error
+
        try {
-         setUserProfile(prev => ({ ...prev, [field]: processedValue }));
-         // Clear error on successful update attempt (even if value is null)
-         // Note: useLocalStorage handles actual storage errors.
-       } catch (storageError: any) {
-           // Handle potential errors from the setter
-           if (storageError instanceof LocalStorageError) {
-               toast({
-                   variant: 'destructive',
-                   title: '設定檔儲存錯誤',
-                   description: storageError.message || '更新個人資料時發生未預期的錯誤。'
-               });
-           } else {
-                 toast({
-                     variant: 'destructive',
-                     title: '設定檔儲存錯誤',
-                     description: '更新個人資料時發生未預期的錯誤。'
-                 });
-           }
-           console.error("儲存個人資料時發生錯誤:", storageError);
+         // Update Firestore
+         const profileRef = doc(db, 'users', user.uid);
+         await updateDoc(profileRef, { [field]: processedValue });
+          // toast({ title: "設定檔已更新", description: "您的個人資料已成功儲存。" }); // Optional success toast
+       } catch (dbError: any) {
+           console.error("更新 Firestore 個人資料時發生錯誤:", dbError);
+           setDbError("儲存個人資料變更時發生錯誤。");
+           toast({
+               variant: 'destructive',
+               title: '設定檔儲存錯誤',
+               description: '儲存個人資料變更時發生未預期的錯誤。'
+           });
+           // Revert optimistic update if Firestore save fails
+           // Note: This might cause a flicker. Consider disabling input during save.
+           setUserProfile(prev => prev ? { ...prev, [field]: userProfile[field] } : null); // Revert to original profile value
        }
   };
 
-  const bmr = useMemo(() => calculateBMR(userProfile), [userProfile]);
-  const dailyCalories = useMemo(() => calculateDailyCalories(userProfile), [userProfile]);
-  const bmi = useMemo(() => calculateBMI(userProfile), [userProfile]);
-  const calculatedRecommendedWater = useMemo(() => calculateRecommendedWater(userProfile), [userProfile]); // Renamed for clarity
+  const bmr = useMemo(() => calculateBMR(userProfile ?? {}), [userProfile]);
+  const dailyCalories = useMemo(() => calculateDailyCalories(userProfile ?? {}), [userProfile]);
+  const bmi = useMemo(() => calculateBMI(userProfile ?? {}), [userProfile]);
+  const calculatedRecommendedWater = useMemo(() => calculateRecommendedWater(userProfile ?? {}), [userProfile]); // Renamed for clarity
   const defaultWaterTarget = 2000; // Default target if profile is incomplete or weight not set
 
 
-   // --- Water Tracking ---
+   // --- Water Tracking (Firestore) ---
 
-   const addWater = (amountToAdd: number) => { // amount in ml
-       if (!isClient || isNaN(amountToAdd) || amountToAdd <= 0) {
-           toast({ variant: 'destructive', title: "無效數量", description: "請輸入有效的正數水量。" });
-           return;
-       }
+  const addWater = async (amountToAdd: number) => {
+    if (!user) {
+        toast({ variant: 'destructive', title: "未登入", description: "請先登入以記錄飲水。" });
+        return;
+    }
+    if (!isClient || isNaN(amountToAdd) || amountToAdd <= 0) {
+        toast({ variant: 'destructive', title: "無效數量", description: "請輸入有效的正數水量。" });
+        return;
+    }
 
-       const today = getCurrentDate();
-       const newWaterEntry: WaterLogEntry = {
-           id: Date.now().toString(),
-           timestamp: new Date().toISOString(),
-           amount: amountToAdd,
-       };
+    setIsLoading(true); // Use general loading state
+    setDbError(null);
 
-       try {
-           setWaterLog(prevLog => {
-               const todaysEntries = prevLog[today] || [];
-               // Basic check to prevent excessively large logs for a single day
-               if (todaysEntries.length >= 100) { // Example limit: 100 water entries per day
-                   toast({ variant: 'destructive', title: '記錄已滿', description: '今日飲水記錄已達上限。' });
-                   return prevLog; // Prevent adding new entry
-               }
-               return {
-                   ...prevLog,
-                   [today]: [...todaysEntries, newWaterEntry],
-               };
-           });
-           toast({ title: "已記錄飲水", description: `已新增 ${amountToAdd} 毫升。` });
-           setCustomWaterAmount(''); // Clear custom input after logging
-       } catch (storageError: any) {
-           // Handle potential errors from the setter
-           if (storageError instanceof LocalStorageError) {
-               toast({
-                   variant: 'destructive',
-                   title: '記錄錯誤',
-                   description: storageError.message || '記錄飲水時發生未預期的錯誤。'
-               });
-           } else {
-                 toast({
-                     variant: 'destructive',
-                     title: '記錄錯誤',
-                     description: '記錄飲水時發生未預期的錯誤。'
-                 });
-           }
-           console.error("記錄飲水時發生錯誤:", storageError);
-       }
-   };
+    const newWaterEntryData = {
+        userId: user.uid,
+        timestamp: Timestamp.now(), // Use server timestamp
+        amount: amountToAdd,
+    };
 
-  const deleteWaterEntry = (id: string) => {
-      if (!isClient || !selectedDate) return;
-      const dateKey = format(selectedDate, 'yyyy-MM-dd');
+    try {
+        await addDoc(collection(db, 'waterEntries'), newWaterEntryData);
+        toast({ title: "已記錄飲水", description: `已新增 ${amountToAdd} 毫升。` });
+        setCustomWaterAmount(''); // Clear custom input after logging
+        // Local state updates via listener
+    } catch (dbError: any) {
+        console.error("寫入 Firestore 時發生錯誤:", dbError);
+        setDbError("記錄飲水時發生錯誤。");
+        toast({
+            variant: 'destructive',
+            title: '記錄錯誤',
+            description: '記錄飲水時發生未預期的錯誤。'
+        });
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
+  const deleteWaterEntry = async (id: string) => {
+      if (!isClient || !user) return;
+      // No need for selectedDate here, Firestore listener handles updates
+
+      setIsLoading(true);
+      setDbError(null);
 
       try {
-          setWaterLog(prevLog => {
-              const todaysEntries = prevLog[dateKey] || [];
-              const updatedEntries = todaysEntries.filter(entry => entry.id !== id);
-              return {
-                  ...prevLog,
-                  [dateKey]: updatedEntries,
-              };
-          });
+          const entryRef = doc(db, 'waterEntries', id);
+          await deleteDoc(entryRef);
           toast({ title: "刪除成功", description: "飲水記錄已刪除。" });
-      } catch (storageError: any) {
-          // Handle potential errors from the setter
-          if (storageError instanceof LocalStorageError) {
-              toast({
-                  variant: 'destructive',
-                  title: '刪除錯誤',
-                  description: storageError.message || '刪除飲水記錄時發生未預期的錯誤。'
-              });
-          } else {
-                 toast({
-                     variant: 'destructive',
-                     title: '刪除錯誤',
-                     description: '刪除飲水記錄時發生未預期的錯誤。'
-                 });
-          }
-          console.error("刪除飲水記錄時發生錯誤:", storageError);
+          // Local state updates via listener
+      } catch (dbError: any) {
+          console.error("刪除 Firestore 文件時發生錯誤:", dbError);
+          setDbError("刪除飲水記錄時發生錯誤。");
+          toast({
+              variant: 'destructive',
+              title: '刪除錯誤',
+              description: '刪除飲水記錄時發生未預期的錯誤。'
+          });
+      } finally {
+          setIsLoading(false);
       }
   };
 
 
-  const resetTodaysWater = () => {
-      if (!isClient || !selectedDate) return;
+  const resetTodaysWater = async () => {
+      if (!isClient || !user || !selectedDate) return;
       const dateKey = format(selectedDate, 'yyyy-MM-dd');
+      const entriesToDelete = waterLog[dateKey] || [];
+
+      if (entriesToDelete.length === 0) {
+          toast({ title: "無需重設", description: "今日尚無飲水記錄。" });
+          return;
+      }
+
+      setIsLoading(true);
+      setDbError(null);
+
       try {
-          setWaterLog(prevLog => ({ ...prevLog, [dateKey]: [] })); // Reset to empty array
+          // Use a batch write for atomic deletion
+          const batch = writeBatch(db);
+          entriesToDelete.forEach(entry => {
+              const docRef = doc(db, 'waterEntries', entry.id);
+              batch.delete(docRef);
+          });
+          await batch.commit();
+
           toast({ title: "已重設", description: `${format(selectedDate, 'yyyy/MM/dd')} 飲水量已重設。` });
-      } catch (storageError: any) {
-           // Handle potential errors from the setter
-           if (storageError instanceof LocalStorageError) {
-               toast({
-                   variant: 'destructive',
-                   title: '重設錯誤',
-                   description: storageError.message || '重設飲水時發生未預期的錯誤。'
-               });
-           } else {
-               toast({
-                   variant: 'destructive',
-                   title: '重設錯誤',
-                   description: '重設飲水時發生未預期的錯誤。'
-               });
-           }
-          console.error("重設飲水時發生錯誤:", storageError);
+          // Local state updates via listener
+      } catch (dbError: any) {
+           console.error("批次刪除 Firestore 文件時發生錯誤:", dbError);
+           setDbError("重設飲水記錄時發生錯誤。");
+           toast({
+               variant: 'destructive',
+               title: '重設錯誤',
+               description: '重設飲水時發生未預期的錯誤。'
+           });
+      } finally {
+           setIsLoading(false);
       }
   };
 
 
-   // Calculate total water intake for the selected date
+   // Calculate total water intake for the selected date from local aggregated state
    const selectedDateWaterIntake = useMemo(() => {
        if (!isClient || !selectedDate) return 0;
        const dateKey = format(selectedDate, 'yyyy-MM-dd');
@@ -1095,7 +1204,7 @@ export default function CalorieLogger() {
    const currentRecommendedWater = calculatedRecommendedWater ?? defaultWaterTarget; // Use default if null
    const waterProgress = currentRecommendedWater ? Math.min((selectedDateWaterIntake / currentRecommendedWater) * 100, 100) : 0;
 
-   // Calculate yesterday's water intake and achievement
+   // Calculate yesterday's water intake and achievement from local aggregated state
    const yesterdayWaterIntake = useMemo(() => {
         if (!isClient) return 0;
         const yesterdayDate = subDays(new Date(), 1);
@@ -1158,9 +1267,9 @@ export default function CalorieLogger() {
                             )}
                         </CardDescription>
                          <div className="text-xs text-muted-foreground mt-1 flex items-center flex-wrap gap-x-2 gap-y-1">
-                             <span className="flex items-center"><Clock size={12} className="mr-1"/> {new Date(entry.timestamp).toLocaleString('zh-TW')}</span>
+                              <span className="flex items-center"><Clock size={12} className="mr-1"/> {entry.timestamp ? format(entry.timestamp.toDate(), 'yyyy/MM/dd HH:mm', { locale: zhTW }) : '無時間戳'}</span>
                              {entry.mealType && <span className="flex items-center"><UtensilsCrossed size={12} className="mr-1"/> {mealTypeTranslations[entry.mealType] || entry.mealType}</span>}
-                             {entry.location && <span className="flex items-center"><MapPin size={12} className="mr-1"/> <span className="line-clamp-1" title={entry.location}>{entry.location}</span></span>} {/* Use line-clamp here too */}
+                             {entry.location && <span className="flex items-center"><MapPin size={12} className="mr-1"/> <span className="truncate" title={entry.location}>{entry.location}</span></span>} {/* Use truncate here too */}
                              {entry.cost !== null && typeof entry.cost === 'number' && ( // Check type before toFixed
                                 <span className="flex items-center">
                                     <DollarSign size={12} className="mr-1"/> ${entry.cost.toFixed(2)}
@@ -1306,8 +1415,9 @@ export default function CalorieLogger() {
              <Button variant="outline" onClick={() => { setImageSrc(null); setEstimation(null); setError(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
                  清除
              </Button>
-             <Button onClick={logCalories} variant="default" disabled={!imageSrc}> {/* Disable if no image */}
-                 <Plus className="mr-2 h-4 w-4" /> 記錄卡路里
+             <Button onClick={logCalories} variant="default" disabled={!imageSrc || !user || isLoading}> {/* Disable if no image, not logged in, or loading */}
+                 {isLoading ? <LoadingSpinner className="mr-2" size={16} /> : <Plus className="mr-2 h-4 w-4" /> }
+                 {isLoading ? '記錄中...' : '記錄卡路里'}
              </Button>
         </CardFooter>
     </Card>
@@ -1324,14 +1434,14 @@ export default function CalorieLogger() {
          logsToDisplay = calorieLog.filter(entry => {
              if (!entry || !entry.timestamp) return false;
              try {
-                 const entryDate = new Date(entry.timestamp);
+                 const entryDate = entry.timestamp.toDate(); // Convert Firestore Timestamp
                  return isValidDate(entryDate) && isSameDay(entryDate, selectedDate);
              } catch {
-                 return false; // Invalid date string
+                 return false; // Invalid date object
              }
          });
          // Daily view always sorts by time descending
-         logsToDisplay.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+         logsToDisplay.sort((a, b) => b.timestamp.toMillis() - a.timestamp.toMillis());
 
      } else { // Monthly view
          const monthStart = startOfMonth(selectedDate);
@@ -1339,17 +1449,17 @@ export default function CalorieLogger() {
          logsToDisplay = calorieLog.filter(entry => {
               if (!entry || !entry.timestamp) return false;
               try {
-                 const entryDate = new Date(entry.timestamp);
+                 const entryDate = entry.timestamp.toDate(); // Convert Firestore Timestamp
                  return isValidDate(entryDate) && isWithinInterval(entryDate, { start: monthStart, end: monthEnd });
                } catch {
-                   return false; // Invalid date string
+                   return false; // Invalid date object
                }
          });
 
          // Apply monthly sorting
          switch (monthlySortCriteria) {
              case 'time-asc':
-                 logsToDisplay.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                 logsToDisplay.sort((a, b) => a.timestamp.toMillis() - b.timestamp.toMillis());
                  break;
              case 'calories-desc':
                  logsToDisplay.sort((a, b) => b.calorieEstimate - a.calorieEstimate);
@@ -1359,7 +1469,7 @@ export default function CalorieLogger() {
                  break;
              case 'time-desc': // Default
              default:
-                 logsToDisplay.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                 logsToDisplay.sort((a, b) => b.timestamp.toMillis() - a.timestamp.toMillis());
                  break;
          }
      }
@@ -1376,7 +1486,7 @@ export default function CalorieLogger() {
     calorieLog.forEach(entry => {
         if (entry?.timestamp) {
             try {
-                const date = startOfDay(new Date(entry.timestamp));
+                const date = startOfDay(entry.timestamp.toDate()); // Convert Firestore Timestamp
                 if (isValidDate(date)) days.add(format(date, 'yyyy-MM-dd'));
             } catch {
                 // Ignore entries with invalid timestamps
@@ -1393,88 +1503,102 @@ export default function CalorieLogger() {
         .filter(dateKey => waterLog[dateKey]?.length > 0)
         .map(dateKey => {
             try {
-                return new Date(dateKey);
+                return new Date(dateKey); // Date key is already YYYY-MM-DD string
             } catch {
                 return null; // Invalid date key
             }
         })
-        .filter(isValidDate); // Filter out nulls and invalid dates
+        .filter((date): date is Date => date instanceof Date && isValidDate(date)); // Type guard
  }, [waterLog, isClient]);
 
 
  const renderStorageError = () => {
     if (!isClient) return null; // Only render errors on client
-    const errorMessages = [
-        logError,
-        profileError,
-        waterLogError,
-        notificationSettingsError
-    ].filter(Boolean); // Filter out null errors
 
-     if (errorMessages.length === 0) return null;
+     // Combine LocalStorage errors and Firestore errors
+     const localErrors = [notificationSettingsError].filter(Boolean);
+     const allErrors = [...localErrors, dbError].filter(Boolean);
+
+
+     if (allErrors.length === 0) return null;
 
      // Display the first error encountered
-     const firstError = errorMessages[0];
-     let title = '儲存空間錯誤';
-     if (firstError === profileError) title = '設定檔儲存錯誤';
-     else if (firstError === waterLogError) title = '飲水記錄儲存錯誤';
-     else if (firstError === notificationSettingsError) title = '通知設定儲存錯誤';
+     const firstError = allErrors[0];
+     let title = '錯誤';
+     let description = '處理資料時發生錯誤。';
+
+     if (firstError instanceof LocalStorageError) {
+         title = '客戶端儲存錯誤';
+         description = firstError.message;
+     } else if (typeof firstError === 'string') { // Firestore error is a string
+         title = '資料庫錯誤';
+         description = firstError;
+     }
+
 
      return (
          <Alert variant="destructive" className="my-4">
              <Info className="h-4 w-4" />
              <AlertTitle>{title}</AlertTitle>
-             <AlertDescription>{firstError?.message || '處理資料時發生錯誤。儲存空間可能已滿。'}</AlertDescription>
+             <AlertDescription>{description}</AlertDescription>
          </Alert>
      );
  };
 
  const renderLogList = () => {
-    if (!isClient) {
-        // Render placeholder or loading state on the server
-        return (
-             <div className="mt-6 px-4 md:px-6"> {/* Add padding here for server rendering */}
-                 <div className="flex justify-between items-center mb-4">
-                     <h2 className="text-2xl font-semibold text-primary flex items-center gap-2"><CalendarDays size={24}/> 卡路里記錄摘要</h2>
-                      {/* View Mode Toggle Placeholder */}
-                      <Skeleton className="h-9 w-32 rounded-md" />
-                 </div>
-
-                 {/* Calendar/Month Selector Placeholder */}
-                 <div className="mb-4 flex justify-center w-full border-y"> {/* Adjusted width and border */}
-                     <Skeleton className="h-[360px] w-full rounded-none" /> {/* Adjusted height and width */}
-                 </div>
-                  {/* Sorting Options Placeholder (for monthly view) */}
-                  <div className="mb-4 flex justify-end">
-                      <Skeleton className="h-9 w-40 rounded-md" />
+     // Render loading skeletons if auth or db data is loading
+     if (authLoading || dbLoading) {
+         return (
+              <div className="mt-0 px-4 md:px-6"> {/* Add padding here for server rendering */}
+                  <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-2xl font-semibold text-primary flex items-center gap-2"><CalendarDays size={24}/> 卡路里記錄摘要</h2>
+                       {/* View Mode Toggle Placeholder */}
+                       <Skeleton className="h-9 w-32 rounded-md" />
                   </div>
 
-                <div className="space-y-4">
-                    {[...Array(2)].map((_, i) => ( // Reduced placeholder count
-                         <Card key={i} className="mb-4 opacity-50 animate-pulse">
-                            <CardHeader className="p-4">
-                                <div className="flex items-start space-x-4">
-                                    <Skeleton className="w-16 h-16 sm:w-20 sm:h-20 rounded-md flex-shrink-0"/>
-                                    <div className="flex-grow space-y-2">
-                                        <Skeleton className="h-4 rounded w-3/4"/>
-                                        <Skeleton className="h-3 rounded w-1/2"/>
-                                        <Skeleton className="h-3 rounded w-5/6"/>
-                                    </div>
-                                     <div className="flex flex-col sm:flex-row items-center gap-1 ml-auto flex-shrink-0">
-                                         <Skeleton className="h-8 w-8 rounded"/>
-                                         <Skeleton className="h-8 w-8 rounded"/>
+                  {/* Calendar/Month Selector Placeholder */}
+                  <div className="mb-4 flex justify-center w-full border-y"> {/* Adjusted width and border */}
+                      <Skeleton className="h-[360px] w-full rounded-none" /> {/* Adjusted height and width */}
+                  </div>
+                   {/* Sorting Options Placeholder (for monthly view) */}
+                   <div className="mb-4 flex justify-end">
+                       <Skeleton className="h-9 w-40 rounded-md" />
+                   </div>
+
+                 <div className="space-y-4">
+                     {[...Array(2)].map((_, i) => ( // Reduced placeholder count
+                          <Card key={i} className="mb-4 opacity-50 animate-pulse">
+                             <CardHeader className="p-4">
+                                 <div className="flex items-start space-x-4">
+                                     <Skeleton className="w-16 h-16 sm:w-20 sm:h-20 rounded-md flex-shrink-0"/>
+                                     <div className="flex-grow space-y-2">
+                                         <Skeleton className="h-4 rounded w-3/4"/>
+                                         <Skeleton className="h-3 rounded w-1/2"/>
+                                         <Skeleton className="h-3 rounded w-5/6"/>
                                      </div>
-                                </div>
-                            </CardHeader>
-                             {/* Accordion Placeholder */}
-                             <div className="px-4 pb-2">
-                                 <Skeleton className="h-6 w-1/3 rounded"/>
-                             </div>
-                        </Card>
-                    ))}
-                </div>
+                                      <div className="flex flex-col sm:flex-row items-center gap-1 ml-auto flex-shrink-0">
+                                          <Skeleton className="h-8 w-8 rounded"/>
+                                          <Skeleton className="h-8 w-8 rounded"/>
+                                      </div>
+                                 </div>
+                             </CardHeader>
+                         </Card>
+                     ))}
+                 </div>
+             </div>
+         );
+     }
+
+    if (!isClient) return null; // Should be handled by loading state above on client
+
+    if (!user) {
+        return (
+             <div className="text-center text-muted-foreground py-10 mt-6 px-4 md:px-6">
+                 <User className="mx-auto h-12 w-12 opacity-50 mb-4" />
+                 <p className="font-semibold mb-2">請先登入</p>
+                 <p className="text-sm">登入後即可查看和記錄您的卡路里。請前往「設定」分頁登入。</p>
             </div>
-        );
+        )
     }
 
      const handleMonthChange = (month: Date) => {
@@ -1519,6 +1643,7 @@ export default function CalorieLogger() {
                      classNames={{ // Ensure month uses full width
                         months: "flex flex-col sm:flex-row w-full",
                         month: "space-y-4 w-full",
+                        caption_dropdowns: "flex justify-center gap-2 items-center w-full px-10", // Ensure dropdowns take full width
                         table: "w-full border-collapse space-y-1",
                         head_row: "flex justify-around", // Distribute headers evenly
                         head_cell: "text-muted-foreground rounded-md w-[14.28%] font-normal text-[0.8rem]", // Use percentages for width
@@ -1538,10 +1663,7 @@ export default function CalorieLogger() {
                         ),
                         day_selected: // Use this specific class for selected day styling
                           "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
-                        day_today: { // Keep today styling, ensure it doesn't conflict with selected
-                           backgroundColor: 'hsl(var(--accent))',
-                           color: 'hsl(var(--accent-foreground))',
-                        },
+                        day_today: "bg-accent text-accent-foreground", // Kept today style
                      }}
                      disabled={date => date > new Date() || date < new Date("1900-01-01")}
                      initialFocus
@@ -1551,7 +1673,7 @@ export default function CalorieLogger() {
                          waterLogged: waterLoggedDays,
                      }}
                      modifiersStyles={{
-                         calorieLogged: { fontWeight: 'bold' },
+                         calorieLogged: { fontWeight: 'bold', border: '1px solid hsl(var(--primary)/0.5)' }, // Example: Add a border
                          waterLogged: { textDecoration: 'underline', textDecorationColor: 'hsl(var(--chart-2))', textDecorationThickness: '2px' }, // Use underline instead
                      }}
                      captionLayout="dropdown-buttons" // Use dropdowns for easier navigation
@@ -1616,7 +1738,7 @@ export default function CalorieLogger() {
             )}
 
              {/* Show initial message if no logs exist at all */}
-             {calorieLog.length === 0 && (
+             {calorieLog.length === 0 && !dbLoading && ( // Only show if not loading and log is empty
                  <div className="text-center text-muted-foreground py-10 mt-6 px-4 md:px-6"> {/* Add padding */}
                      <UtensilsCrossed className="mx-auto h-12 w-12 opacity-50 mb-4" />
                      <p>尚未記錄任何卡路里。</p>
@@ -1632,10 +1754,10 @@ export default function CalorieLogger() {
     <div className="space-y-2 pt-4 border-t">
         <h4 className="text-sm font-medium text-muted-foreground">今日飲水記錄：</h4>
         <ul className="max-h-40 overflow-y-auto space-y-1 pr-2">
-            {entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map(entry => (
+            {entries.sort((a, b) => b.timestamp.toMillis() - a.timestamp.toMillis()).map(entry => (
                 <li key={entry.id} className="flex items-center justify-between text-sm bg-muted/50 p-2 rounded">
-                    <span>{format(new Date(entry.timestamp), 'HH:mm')} - {entry.amount} 毫升</span>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => deleteWaterEntry(entry.id)} aria-label="刪除此飲水記錄" disabled={!isClient}>
+                     <span>{entry.timestamp ? format(entry.timestamp.toDate(), 'HH:mm') : ''} - {entry.amount} 毫升</span>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => deleteWaterEntry(entry.id)} aria-label="刪除此飲水記錄" disabled={!isClient || isLoading}>
                         <Trash size={14} />
                     </Button>
                 </li>
@@ -1653,6 +1775,21 @@ export default function CalorieLogger() {
          return waterLog[dateKey] || [];
      }, [waterLog, selectedDate, isClient]);
 
+     // Show skeleton if profile is loading
+     if (dbLoading || authLoading) {
+         return <Skeleton className="h-64 w-full mt-6" />;
+     }
+
+     if (!user) {
+         return (
+             <Card className="mt-6 shadow-md text-center text-muted-foreground py-10">
+                <Droplet size={32} className="mx-auto mb-3 opacity-50" />
+                <p>請先登入以追蹤飲水。</p>
+            </Card>
+         )
+     }
+
+
      return (
         <Card className="mt-6 shadow-md">
             <CardHeader>
@@ -1664,7 +1801,7 @@ export default function CalorieLogger() {
                           ? `個人建議飲水量：${calculatedRecommendedWater} 毫升 (約 ${Math.ceil(calculatedRecommendedWater / 250)} 杯)`
                           : `建議飲水量：${defaultWaterTarget} 毫升 (約 ${Math.ceil(defaultWaterTarget / 250)} 杯 - 請完成個人資料以取得個人化建議)`
                       }
-                      {userProfile.weight && <span className="text-xs"> (基於 {userProfile.weight} 公斤體重)</span>}
+                      {userProfile?.weight && <span className="text-xs"> (基於 {userProfile.weight} 公斤體重)</span>}
                  </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1685,23 +1822,24 @@ export default function CalorieLogger() {
                          onChange={(e) => setCustomWaterAmount(e.target.value)}
                          min="1"
                          className="flex-grow"
-                         disabled={!isClient}
+                         disabled={!isClient || isLoading}
                      />
                      <Button
                          onClick={() => addWater(parseInt(customWaterAmount, 10))}
-                         disabled={!isClient || !customWaterAmount || parseInt(customWaterAmount, 10) <= 0}
+                         disabled={!isClient || !customWaterAmount || parseInt(customWaterAmount, 10) <= 0 || isLoading}
                          className="w-full sm:w-auto"
                      >
-                         <Plus className="mr-1 h-4 w-4" /> 新增飲水
+                         {isLoading ? <LoadingSpinner size={16} className="mr-1" /> : <Plus className="mr-1 h-4 w-4" />}
+                         新增飲水
                      </Button>
                  </div>
 
                  {/* Quick Add Buttons */}
                  <div className="flex justify-center gap-2 flex-wrap">
-                    <Button onClick={() => addWater(250)} variant="outline" size="sm" disabled={!isClient}>
+                    <Button onClick={() => addWater(250)} variant="outline" size="sm" disabled={!isClient || isLoading}>
                         <Plus className="mr-1 h-4 w-4" /> 250ml (一杯)
                     </Button>
-                    <Button onClick={() => addWater(500)} variant="outline" size="sm" disabled={!isClient}>
+                    <Button onClick={() => addWater(500)} variant="outline" size="sm" disabled={!isClient || isLoading}>
                         <Plus className="mr-1 h-4 w-4" /> 500ml (一瓶)
                     </Button>
                  </div>
@@ -1715,7 +1853,7 @@ export default function CalorieLogger() {
                      <div className="pt-4 border-t">
                          <AlertDialog>
                             <AlertDialogTrigger asChild>
-                                 <Button variant="destructive" size="sm" disabled={!isClient}>
+                                 <Button variant="destructive" size="sm" disabled={!isClient || isLoading}>
                                    <RotateCw className="mr-1 h-4 w-4" /> 重設本日 ({format(selectedDate ?? new Date(), 'MM/dd')})
                                  </Button>
                              </AlertDialogTrigger>
@@ -1728,7 +1866,8 @@ export default function CalorieLogger() {
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                     <AlertDialogCancel>取消</AlertDialogCancel>
-                                    <AlertDialogAction onClick={resetTodaysWater}>
+                                    <AlertDialogAction onClick={resetTodaysWater} disabled={isLoading}>
+                                        {isLoading ? <LoadingSpinner size={16} className="mr-2"/> : null}
                                         確認重設
                                     </AlertDialogAction>
                                 </AlertDialogFooter>
@@ -1751,6 +1890,7 @@ export default function CalorieLogger() {
  const yesterdayPhotoLogged = useMemo(() => {
     if (!isClient) return false;
     const yesterdayDate = subDays(new Date(), 1);
+    // Check if any date in calorieLoggedDays matches yesterday
     return calorieLoggedDays.some(date => isSameDay(date, yesterdayDate));
  }, [calorieLoggedDays, isClient]);
 
@@ -1759,8 +1899,30 @@ export default function CalorieLogger() {
 
  // New function to render the achievement summary tab content
  const renderAchievementSummary = () => {
+
+     if (authLoading || dbLoading) {
+         return (
+            <>
+                <Skeleton className="h-48 w-full mt-6" />
+                <Skeleton className="h-48 w-full mt-6" />
+            </>
+         )
+     }
+
+    if (!user) {
+        return (
+             <div className="text-center text-muted-foreground py-10 mt-6 px-4 md:px-6">
+                 <Trophy className="mx-auto h-12 w-12 opacity-50 mb-4" />
+                 <p className="font-semibold mb-2">請先登入</p>
+                 <p className="text-sm">登入後即可查看您的成就。請前往「設定」分頁登入。</p>
+            </div>
+        )
+    }
+
+
     const yesterdayKey = format(subDays(new Date(), 1), 'yyyy-MM-dd');
-    const yesterdayTarget = calculateRecommendedWater({ ...userProfile, weight: userProfile.weight }) ?? defaultWaterTarget; // Recalculate target based on profile *at that time* might be complex, use current for simplicity
+    const yesterdayTarget = calculateRecommendedWater(userProfile ?? {}) ?? defaultWaterTarget; // Use current profile for simplicity
+
 
     const getWaterAchievementBadge = () => {
         if (yesterdayWaterGoalMet) {
@@ -1865,7 +2027,24 @@ export default function CalorieLogger() {
  };
 
 
- const renderProfileStats = () => (
+ const renderProfileStats = () => {
+     if (authLoading || dbLoading) {
+         return <Skeleton className="h-64 w-full mt-6" />;
+     }
+     if (!user) {
+         // Don't show stats if not logged in
+         return null;
+     }
+     if (!userProfile) {
+         return (
+              <Card className="mt-6 shadow-md text-center text-muted-foreground py-10">
+                 <User size={32} className="mx-auto mb-3 opacity-50" />
+                 <p>無法載入個人資料。</p>
+             </Card>
+         )
+     }
+
+    return (
     <Card className="mt-6 shadow-md">
         <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1874,11 +2053,11 @@ export default function CalorieLogger() {
             <CardDescription>根據您的個人資料計算的健康指標。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-             {profileError && isClient && ( // Only show profile error on client
+             {dbError && isClient && ( // Only show profile error on client
                  <Alert variant="destructive" className="mb-4">
                      <Info className="h-4 w-4" />
-                     <AlertTitle>設定檔儲存錯誤</AlertTitle>
-                     <AlertDescription>{profileError.message || '無法儲存個人資料變更。儲存空間可能已滿。'}</AlertDescription>
+                     <AlertTitle>設定檔錯誤</AlertTitle>
+                     <AlertDescription>{dbError}</AlertDescription>
                  </Alert>
              )}
              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
@@ -1923,7 +2102,8 @@ export default function CalorieLogger() {
              基礎代謝率 (BMR) 是您身體在休息時燃燒的卡路里數量。BMI 是體重指數。建議卡路里會根據您的健康目標調整。
         </CardFooter>
     </Card>
-);
+    );
+};
 
 
   const renderEditDialog = () => (
@@ -1971,10 +2151,10 @@ export default function CalorieLogger() {
                          <Input
                              id="edit-timestamp"
                              type="datetime-local" // Use datetime-local for date and time
-                              value={editingEntry.timestamp ? formatISOToLocalDateTimeString(editingEntry.timestamp) : ''} // Format ISO to local for input
+                              value={formatTimestampToLocalDateTimeString(editingEntry.timestamp)} // Format Timestamp to local for input
                              onChange={(e) => handleEditChange('timestamp', e.target.value)} // Input value is local time string
                              className="col-span-3"
-                             max={formatISOToLocalDateTimeString(new Date().toISOString())} // Prevent selecting future dates/times
+                              max={formatTimestampToLocalDateTimeString(Timestamp.now())} // Prevent selecting future dates/times
                          />
                      </div>
                       {/* Meal Type */}
@@ -2044,10 +2224,14 @@ export default function CalorieLogger() {
                  </div>
              )}
              <DialogFooter>
+                  {dbError && <p className="text-sm text-destructive mr-auto">{dbError}</p>}
                  <DialogClose asChild>
-                     <Button type="button" variant="outline">取消</Button>
+                     <Button type="button" variant="outline" disabled={isLoading}>取消</Button>
                  </DialogClose>
-                 <Button type="button" onClick={saveEdit}>儲存變更</Button>
+                 <Button type="button" onClick={saveEdit} disabled={isLoading}>
+                     {isLoading ? <LoadingSpinner size={16} className="mr-2"/> : null}
+                     儲存變更
+                 </Button>
              </DialogFooter>
          </DialogContent>
      </Dialog>
@@ -2125,18 +2309,37 @@ export default function CalorieLogger() {
 
 
  // Profile Editing Section
- const renderProfileEditor = () => (
+ const renderProfileEditor = () => {
+      // Show skeleton if profile is loading
+     if (dbLoading || authLoading) {
+         return <Skeleton className="h-96 w-full mt-6" />;
+     }
+
+     if (!user) {
+          // Don't show editor if not logged in
+         return null;
+     }
+      if (!userProfile) {
+         return (
+              <Card className="mt-6 shadow-md text-center text-muted-foreground py-10">
+                 <User size={32} className="mx-auto mb-3 opacity-50" />
+                 <p>無法載入個人資料。</p>
+             </Card>
+         )
+     }
+
+    return (
      <Card className="mt-6 shadow-md">
          <CardHeader>
              <CardTitle className="flex items-center gap-2"><Settings size={24} /> 個人資料設定</CardTitle>
               <CardDescription>更新您的個人資訊以取得更準確的計算。</CardDescription>
          </CardHeader>
          <CardContent className="space-y-4">
-               {profileError && isClient && ( // Only show error on client
+               {dbError && isClient && ( // Only show error on client
                  <Alert variant="destructive" className="mb-4">
                      <Info className="h-4 w-4" />
                      <AlertTitle>設定檔儲存錯誤</AlertTitle>
-                     <AlertDescription>{profileError.message || '無法儲存個人資料變更。儲存空間可能已滿。'}</AlertDescription>
+                     <AlertDescription>{dbError}</AlertDescription>
                  </Alert>
               )}
              {/* Manual Input / Apple Health Toggle (Conceptual) */}
@@ -2146,15 +2349,25 @@ export default function CalorieLogger() {
                       <Label htmlFor="profile-manual">手動輸入</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="apple" id="profile-apple" disabled={!isClient} />
-                      <Label htmlFor="profile-apple" className="flex items-center gap-1">
-                          <Apple size={14}/> 連接 Apple 健康
-                      </Label>
+                       {/* Apple Health Integration - Placeholder */}
+                       <TooltipProvider>
+                           <Tooltip>
+                               <TooltipTrigger asChild>
+                                   {/* Need a div wrapper because RadioGroupItem can be disabled */}
+                                   <div className="flex items-center space-x-2">
+                                       <RadioGroupItem value="apple" id="profile-apple" disabled={true} />
+                                       <Label htmlFor="profile-apple" className={cn("flex items-center gap-1", "text-muted-foreground cursor-not-allowed")}>
+                                           <Apple size={14}/> 連接 Apple 健康
+                                       </Label>
+                                   </div>
+                               </TooltipTrigger>
+                               <TooltipContent>
+                                   <p>Apple 健康整合即將推出。</p>
+                               </TooltipContent>
+                           </Tooltip>
+                       </TooltipProvider>
                   </div>
              </RadioGroup>
-              <p className="text-xs text-muted-foreground mb-4">
-                  (Apple 健康整合即將推出。目前請使用手動輸入。)
-              </p>
 
              {/* Form Fields */}
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2168,7 +2381,7 @@ export default function CalorieLogger() {
                          value={userProfile.age === null ? '' : userProfile.age}
                          onChange={(e) => handleProfileChange('age', e.target.value)}
                          min="1" // Minimum age 1
-                         disabled={!isClient} // Disable on server
+                         disabled={!isClient || isLoading} // Disable on server or during DB operation
                      />
                  </div>
                  {/* Gender */}
@@ -2177,7 +2390,7 @@ export default function CalorieLogger() {
                       <Select
                          value={userProfile.gender || 'none'} // Use 'none' for null value
                          onValueChange={(value) => handleProfileChange('gender', value)}
-                         disabled={!isClient} // Disable on server
+                         disabled={!isClient || isLoading} // Disable on server or during DB operation
                       >
                          <SelectTrigger id="gender" aria-label="選取生理性別">
                              <SelectValue placeholder="選取生理性別" />
@@ -2200,7 +2413,7 @@ export default function CalorieLogger() {
                          value={userProfile.height === null ? '' : userProfile.height}
                          onChange={(e) => handleProfileChange('height', e.target.value)}
                           min="1" // Minimum height 1cm
-                          disabled={!isClient} // Disable on server
+                          disabled={!isClient || isLoading} // Disable on server or during DB operation
                      />
                  </div>
                   {/* Weight */}
@@ -2214,7 +2427,7 @@ export default function CalorieLogger() {
                          onChange={(e) => handleProfileChange('weight', e.target.value)}
                          min="1" // Minimum weight 1kg
                          step="0.1" // Allow decimal for weight
-                         disabled={!isClient} // Disable on server
+                         disabled={!isClient || isLoading} // Disable on server or during DB operation
                      />
                  </div>
                  {/* Activity Level */}
@@ -2223,7 +2436,7 @@ export default function CalorieLogger() {
                      <Select
                          value={userProfile.activityLevel || 'none'} // Use 'none' for null value
                          onValueChange={(value) => handleProfileChange('activityLevel', value)}
-                         disabled={!isClient} // Disable on server
+                         disabled={!isClient || isLoading} // Disable on server or during DB operation
                      >
                          <SelectTrigger id="activityLevel" aria-label="選取活動水平">
                              <SelectValue placeholder="選取您的活動水平" />
@@ -2242,7 +2455,7 @@ export default function CalorieLogger() {
                      <Select
                          value={userProfile.healthGoal || 'none'} // Use 'none' for null value
                          onValueChange={(value) => handleProfileChange('healthGoal', value)}
-                         disabled={!isClient} // Disable on server
+                         disabled={!isClient || isLoading} // Disable on server or during DB operation
                      >
                          <SelectTrigger id="healthGoal" aria-label="選取健康目標">
                              <SelectValue placeholder="選取您的健康目標" />
@@ -2261,7 +2474,8 @@ export default function CalorieLogger() {
              更新這些資訊將重新計算您的 BMI、BMR 和建議卡路里/飲水量。
           </CardFooter>
      </Card>
- );
+    );
+ };
 
 
  // Notification Settings Trigger Button
@@ -2308,6 +2522,16 @@ export default function CalorieLogger() {
       </div>
   );
 
+ // --- Main Return ---
+  if (!isClient) {
+     // Render basic loading state or placeholder on server
+     return (
+        <div className="flex flex-col h-full bg-background items-center justify-center">
+            <LoadingSpinner size={48}/>
+        </div>
+     );
+  }
+
 
   return (
     // Changed to flex layout for app structure
@@ -2321,11 +2545,19 @@ export default function CalorieLogger() {
 
                  {/* Estimation Result (only show if imageSrc exists and not cropping, and on client) */}
                  {isClient && imageSrc && !isCropping && (
-                     <div className="px-4 md:px-6">{renderEstimationResult()}</div> /* Add padding here */
+                      <div className="px-4 md:px-6">{renderEstimationResult()}</div> /* Add padding here */
                  )}
 
-                 {/* Calorie Log Summary */}
-                {renderLogList()}
+                 {/* Show only if logged in */}
+                 {user && renderLogList()}
+                 {!user && !authLoading && ( // Show login prompt if not logged in and not loading
+                     <div className="text-center text-muted-foreground py-10 mt-6 px-4 md:px-6">
+                         <User className="mx-auto h-12 w-12 opacity-50 mb-4" />
+                         <p className="font-semibold mb-2">請先登入</p>
+                         <p className="text-sm">登入後即可查看和記錄您的卡路里。請前往「設定」分頁登入。</p>
+                    </div>
+                 )}
+
 
             </TabsContent>
 
@@ -2341,9 +2573,23 @@ export default function CalorieLogger() {
             </TabsContent>
 
              {/* Tab 4: Settings */}
-             <TabsContent value="settings" className="mt-0 h-full px-4 md:px-6"> {/* Add padding here */}
-                 {renderProfileEditor()}
-                 {renderNotificationSettingsTrigger()}
+             <TabsContent value="settings" className="mt-0 h-full px-4 md:px-6 space-y-6"> {/* Add padding and spacing */}
+                  {/* Authentication Section */}
+                  <Card>
+                      <CardHeader>
+                         <CardTitle>帳號</CardTitle>
+                         <CardDescription>管理您的登入狀態。</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                           {authLoading && <Skeleton className="h-10 w-full" />}
+                           {!authLoading && user && <UserProfileDisplay />}
+                           {!authLoading && !user && <LoginButton />}
+                      </CardContent>
+                  </Card>
+
+                 {/* Show profile editor only when logged in */}
+                 {user && renderProfileEditor()}
+                 {user && renderNotificationSettingsTrigger()}
              </TabsContent>
       </div>
 
@@ -2371,6 +2617,7 @@ export default function CalorieLogger() {
                               size="icon"
                               className="h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg -translate-y-4 hover:bg-primary/90"
                               aria-label="新增記錄"
+                              disabled={!user} // Disable if not logged in
                           >
                               <Plus size={28} />
                           </Button>
@@ -2379,7 +2626,7 @@ export default function CalorieLogger() {
                          <DialogHeader>
                              <DialogTitle>新增卡路里記錄</DialogTitle>
                              <DialogDescription>
-                                 點擊選擇上傳影像或拍攝照片
+                                  {hasCameraPermission === false ? "請允許相機權限以拍攝照片，或選擇上傳。" : "點擊選擇上傳影像或拍攝照片"}
                              </DialogDescription>
                          </DialogHeader>
                          <div className="grid gap-4 py-4">
@@ -2398,11 +2645,21 @@ export default function CalorieLogger() {
                                  className="hidden"
                                  aria-hidden="true"
                              />
+                              {/* Camera Permission Alert */}
+                              { hasCameraPermission === false && isClient && (
+                                  <Alert variant="destructive">
+                                       <Info className="h-4 w-4" />
+                                       <AlertTitle>相機權限問題</AlertTitle>
+                                       <AlertDescription>
+                                           無法存取相機。請檢查您的瀏覽器設定並允許相機權限。
+                                       </AlertDescription>
+                                  </Alert>
+                              )}
                          </div>
                           <DialogFooter>
                              {/* Optionally add a cancel button if needed */}
                              {/* <DialogClose asChild><Button variant="outline">取消</Button></DialogClose> */}
-                         </DialogFooter>
+                          </DialogFooter>
                      </DialogContent>
                  </Dialog>
              </div>
@@ -2430,5 +2687,3 @@ export default function CalorieLogger() {
     </Tabs> // Close the top-level Tabs component
   );
 }
-
-
