@@ -1436,7 +1436,7 @@ export default function CalorieLogger() {
 
                  {/* Calendar/Month Selector Placeholder */}
                  <div className="mb-4 flex justify-center">
-                     <Skeleton className="h-[300px] w-[350px] rounded-md" />
+                     <Skeleton className="h-[300px] w-full rounded-md" /> {/* Changed width */}
                  </div>
                   {/* Sorting Options Placeholder (for monthly view) */}
                   <div className="mb-4 flex justify-end">
@@ -1504,12 +1504,12 @@ export default function CalorieLogger() {
 
 
             {/* Calendar */}
-            <div className="mb-6 flex justify-center">
+             <div className="mb-6 w-full"> {/* Changed width to full */}
                  <Calendar
                      mode="single"
                      selected={selectedDate}
                      onSelect={setSelectedDate}
-                     className="rounded-md border shadow-sm w-full sm:w-auto p-4" // Make calendar wider
+                     className="rounded-md border shadow-sm w-full p-4" // Make calendar full width
                      disabled={date => date > new Date() || date < new Date("1900-01-01")}
                      initialFocus
                      locale={zhTW} // Ensure locale is passed
@@ -2349,7 +2349,7 @@ export default function CalorieLogger() {
                          <DialogHeader>
                              <DialogTitle>新增卡路里記錄</DialogTitle>
                              <DialogDescription>
-                                 選擇拍攝照片或從您的裝置上傳。
+                                 點擊選擇上傳影像或拍攝照片
                              </DialogDescription>
                          </DialogHeader>
                          <div className="grid gap-4 py-4">
