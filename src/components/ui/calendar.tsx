@@ -47,12 +47,14 @@ function Calendar({
         cell: "h-9 w-[14.28%] text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20", // Use percentages
         day: cn(
           buttonVariants({ variant: "ghost" }),
-          "h-9 w-full p-0 font-normal aria-selected:opacity-100" // Make day button full width of cell
+          "h-9 w-full p-0 font-normal aria-selected:opacity-100", // Make day button full width of cell
+          // Remove focus ring specifically for calendar day
+          "focus-visible:ring-0 focus-visible:ring-offset-0"
         ),
         day_range_end: "day-range-end",
         day_selected:
-          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
-        day_today: "bg-accent text-accent-foreground",
+          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground", // Removed focus: styles that might conflict
+        day_today: "bg-accent text-accent-foreground", // Kept today style
         day_outside:
           "day-outside text-muted-foreground opacity-50 aria-selected:bg-accent/50 aria-selected:text-muted-foreground aria-selected:opacity-30", // Adjusted outside day opacity
         day_disabled: "text-muted-foreground opacity-50",
@@ -109,4 +111,5 @@ function Calendar({
 Calendar.displayName = "Calendar"
 
 export { Calendar }
+
 
