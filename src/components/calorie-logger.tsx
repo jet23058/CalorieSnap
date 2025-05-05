@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, {
@@ -120,6 +119,7 @@ export interface WaterLogEntry {
 }
 
 // Update UserProfile to store Firestore document ID and sync with Firestore
+// These fields should match the ones potentially initialized in AuthProvider
 export interface UserProfile {
   id: string; // Firestore document ID (usually the same as auth uid)
   age: number | null;
@@ -128,6 +128,7 @@ export interface UserProfile {
   weight: number | null; // kg
   activityLevel: 'sedentary' | 'light' | 'moderate' | 'active' | 'veryActive' | null;
   healthGoal: HealthGoal | null; // Added health goal
+  // Potentially add other fields like displayName, email if needed locally
 }
 
 const activityLevelMultipliers = {
@@ -162,15 +163,8 @@ const healthGoalTranslations: Record<HealthGoal, string> = {
   maintenance: "維持",
 };
 
-// Default User Profile (without ID initially)
-const defaultUserProfile: Omit<UserProfile, 'id'> = {
-  age: null,
-  gender: null,
-  height: null,
-  weight: null,
-  activityLevel: null,
-  healthGoal: null, // Added default health goal
-};
+// Default User Profile (Initial state before Firestore loads/creates)
+const initialUserProfileState: UserProfile | null = null; // Start as null
 
 // Helper function to calculate BMR (Harris-Benedict Equation)
 const calculateBMR = (profile: Partial<UserProfile>): number | null => { // Allow partial profile
@@ -269,7 +263,7 @@ function convertLocalDateTimeStringToTimestamp(localDateTimeString: string): Tim
 
 
 export default function CalorieLogger() {
-  const { user, loading: authLoading } = useAuth(); // Get user and auth loading state
+  const { user, loading: authLoading, authError } = useAuth(); // Get auth error from context
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [estimation, setEstimation] = useState<EstimateCalorieCountOutput | null>(null);
   const [isLoading, setIsLoading] = useState(false); // General loading state for AI/DB operations
@@ -279,17 +273,16 @@ export default function CalorieLogger() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
 
-  // --- Remove useLocalStorage, replace with Firestore state ---
-  // const [calorieLog, setCalorieLog, logError] = useLocalStorage<CalorieLogEntry[]>('calorieLog', []);
-  // const [userProfile, setUserProfile, profileError] = useLocalStorage<UserProfile>('userProfile', defaultUserProfile);
-  // const [waterLog, setWaterLog, waterLogError] = useLocalStorage<Record<string, WaterLogEntry[]>>('waterLog', {});
+  // --- Firestore state ---
   const [calorieLog, setCalorieLog] = useState<CalorieLogEntry[]>([]);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(initialUserProfileState); // Start as null
   const [waterLog, setWaterLog] = useState<Record<string, WaterLogEntry[]>>({}); // Keep structure for daily aggregation
   const [dbLoading, setDbLoading] = useState(true); // Loading state for Firestore data
   const [dbError, setDbError] = useState<string | null>(null); // Error state for Firestore operations
 
-  const [notificationSettings, setNotificationSettings, notificationSettingsError] = useLocalStorage<NotificationSettings>('notificationSettings', defaultNotificationSettings); // Keep for browser notifications
+  // --- LocalStorage state (for settings) ---
+  const [notificationSettings, setNotificationSettings, notificationSettingsError] = useLocalStorage<NotificationSettings>('notificationSettings', defaultNotificationSettings);
+
   const [editingEntry, setEditingEntry] = useState<CalorieLogEntry | null>(null); // State for the entry being edited
   const [isEditing, setIsEditing] = useState(false); // State to control the edit dialog
   const [showImageModal, setShowImageModal] = useState<string | null>(null); // State to control the image zoom modal
@@ -315,40 +308,51 @@ export default function CalorieLogger() {
 
    // --- Firestore Data Fetching and Realtime Updates ---
    useEffect(() => {
-    if (!user) {
-      // Clear local state if user logs out
-      setCalorieLog([]);
-      setUserProfile(null);
-      setWaterLog({});
+    // Ensure db instance is available
+    if (!db) {
+      console.error("Firestore (db) is not available. Cannot fetch data.");
+      setDbError("資料庫連線失敗，無法載入資料。");
       setDbLoading(false);
-      setDbError(null);
       return;
     }
 
+    if (!user) {
+      // Clear local state if user logs out
+      setCalorieLog([]);
+      setUserProfile(initialUserProfileState); // Reset to initial null state
+      setWaterLog({});
+      setDbLoading(false);
+      setDbError(null);
+      console.log("User logged out, clearing local data.");
+      return;
+    }
+
+    console.log("User logged in, setting up Firestore listeners for:", user.uid);
     setDbLoading(true);
     setDbError(null);
     const userId = user.uid;
 
-    // Fetch User Profile
+    // Fetch User Profile (Profile creation/initialization is now handled in AuthProvider)
     const profileRef = doc(db, 'users', userId);
     const unsubscribeProfile = onSnapshot(profileRef, (docSnap) => {
         if (docSnap.exists()) {
-            setUserProfile({ id: docSnap.id, ...docSnap.data() } as UserProfile);
+            const profileData = { id: docSnap.id, ...docSnap.data() } as UserProfile;
+            console.log("Firestore Profile Snapshot received:", profileData);
+            setUserProfile(profileData);
         } else {
-            // User profile doesn't exist in Firestore yet, create it with defaults
-            console.log("User profile not found, creating...");
-            setDoc(profileRef, { ...defaultUserProfile, /* any other fields from auth user */ }, { merge: true })
-                .then(() => setUserProfile({ id: userId, ...defaultUserProfile }))
-                .catch(err => {
-                    console.error("Error creating user profile:", err);
-                    setDbError("無法建立使用者個人資料。");
-                });
+            // This case should ideally be handled by AuthProvider creating the profile.
+            // If it still happens, log an error and set profile to null.
+            console.error("User profile document not found in Firestore for user:", userId);
+            setUserProfile(null); // Set profile to null if not found
+            setDbError("使用者個人資料未找到，請稍後再試或聯繫支援。");
         }
-         setDbLoading(false); // Profile loading finished (or creation attempted)
+         // Consider setting dbLoading to false only after all listeners are attached
+         // setDbLoading(false);
     }, (error) => {
         console.error("Error fetching user profile:", error);
         setDbError("無法載入使用者個人資料。");
-        setDbLoading(false);
+        setUserProfile(null); // Set profile to null on error
+        setDbLoading(false); // Loading stops on error
     });
 
     // Fetch Calorie Logs (Order by timestamp descending, limit for performance?)
@@ -363,6 +367,7 @@ export default function CalorieLogger() {
       querySnapshot.forEach((doc) => {
         logs.push({ id: doc.id, ...doc.data() } as CalorieLogEntry);
       });
+      console.log(`Firestore Calorie Log Snapshot received: ${logs.length} entries`);
       setCalorieLog(logs);
        // setDbLoading(false); // Calorie loading finished
     }, (error) => {
@@ -387,24 +392,30 @@ export default function CalorieLogger() {
         const aggregatedWaterLog: Record<string, WaterLogEntry[]> = {};
         waterEntries.forEach(entry => {
             if (entry.timestamp) {
-                const dateKey = format(entry.timestamp.toDate(), 'yyyy-MM-dd');
-                if (!aggregatedWaterLog[dateKey]) {
-                    aggregatedWaterLog[dateKey] = [];
+                try {
+                   const dateKey = format(entry.timestamp.toDate(), 'yyyy-MM-dd');
+                   if (!aggregatedWaterLog[dateKey]) {
+                       aggregatedWaterLog[dateKey] = [];
+                   }
+                   aggregatedWaterLog[dateKey].push(entry);
+                } catch (e) {
+                    console.error("Error processing water entry timestamp:", e, entry);
                 }
-                aggregatedWaterLog[dateKey].push(entry);
             }
         });
+        console.log(`Firestore Water Log Snapshot received: ${waterEntries.length} entries, aggregated into ${Object.keys(aggregatedWaterLog).length} dates`);
         setWaterLog(aggregatedWaterLog);
-         // setDbLoading(false); // Water loading finished (or handled by profile loading)
+        setDbLoading(false); // Set loading false after all listeners are attached and initial data received
     }, (error) => {
         console.error("Error fetching water logs:", error);
         setDbError("無法載入飲水記錄。");
-        // setDbLoading(false);
+        setDbLoading(false); // Loading stops on error
     });
 
 
     // Cleanup Firestore listeners on unmount or user change
     return () => {
+      console.log("Cleaning up Firestore listeners for user:", userId);
       unsubscribeProfile();
       unsubscribeCalorie();
       unsubscribeWater();
@@ -835,6 +846,11 @@ export default function CalorieLogger() {
         toast({ variant: 'destructive', title: "記錄失敗", description: "沒有影像可記錄。" });
         return;
     }
+    if (!db) { // Check if db is available
+        toast({ variant: 'destructive', title: "資料庫錯誤", description: "無法連接資料庫，請稍後再試。" });
+        return;
+    }
+
 
     setIsLoading(true); // Indicate database operation
     setDbError(null);
@@ -846,6 +862,8 @@ export default function CalorieLogger() {
         if (!isFetchingLocation) {
             fetchCurrentLocation();
             locationToLog = currentLocation;
+        } else {
+             locationToLog = null; // Don't log 'loading' or 'error' states
         }
     }
 
@@ -853,14 +871,15 @@ export default function CalorieLogger() {
     const baseEntryData = {
         foodItem: currentEstimation?.foodItem || "未命名食物",
         calorieEstimate: currentEstimation?.isFoodItem ? (currentEstimation.calorieEstimate ?? 0) : 0,
-        imageUrl: imageSrc, // Store the Data URL directly (or upload to Firebase Storage and store URL)
+        imageUrl: imageSrc, // Store the Data URL directly (consider Firebase Storage later for size)
         timestamp: entryTime, // JS Date for comment generation
         mealType: null,
-        location: locationToLog && locationToLog !== '正在獲取...' && !locationToLog.startsWith('無法') && !locationToLog.startsWith('瀏覽器') ? locationToLog : null,
+        location: locationToLog, // Use processed location
         cost: null,
         confidence: currentEstimation?.isFoodItem ? (currentEstimation.confidence ?? 0) : 0,
     };
 
+    // Get nutritionist comment based on current data and profile goal
     const nutritionistComment = getNutritionistComment(baseEntryData, userProfile?.healthGoal ?? null);
 
     const newEntryData = {
@@ -886,8 +905,8 @@ export default function CalorieLogger() {
         if (fileInputRef.current) {
           fileInputRef.current.value = ""; // Reset file input
         }
-    } catch (dbError: any) {
-        console.error("寫入 Firestore 時發生錯誤:", dbError);
+    } catch (dbWriteError: any) {
+        console.error("寫入 Firestore 時發生錯誤:", dbWriteError);
         setDbError("儲存卡路里記錄時發生錯誤。");
         toast({
             variant: 'destructive',
@@ -954,21 +973,43 @@ export default function CalorieLogger() {
         toast({ variant: 'destructive', title: "錯誤", description: "找不到要更新的記錄或未登入。" });
         return;
     }
+     if (!db) { // Check if db is available
+         toast({ variant: 'destructive', title: "資料庫錯誤", description: "無法連接資料庫，請稍後再試。" });
+         return;
+     }
 
     setIsLoading(true);
     setDbError(null);
 
     try {
+        // Ensure timestamp is a Firestore Timestamp before saving
+        let timestampToSave: Timestamp;
+        if (editingEntry.timestamp instanceof Timestamp) {
+            timestampToSave = editingEntry.timestamp;
+        } else if (editingEntry.timestamp instanceof Date) { // Should not happen if conversion works
+            timestampToSave = Timestamp.fromDate(editingEntry.timestamp);
+        } else {
+            // Fallback or error if timestamp is invalid - might need adjustment based on handleEditChange logic
+            console.error("Invalid timestamp type in editingEntry:", editingEntry.timestamp);
+            toast({ variant: 'destructive', title: '錯誤', description: '記錄時間格式無效。' });
+            setIsLoading(false);
+            return;
+        }
+
         // Re-generate nutritionist comment if relevant fields changed
-        const baseEntryData = {
+        const baseEntryDataForComment = {
             ...editingEntry,
-            timestamp: editingEntry.timestamp.toDate(), // Convert Timestamp to Date for comment generation
+            timestamp: timestampToSave.toDate(), // Convert Timestamp to Date for comment generation
         };
          // Explicitly exclude Firestore ID, userId and nutritionistComment
-         const { id, userId, nutritionistComment: _, ...commentInputData } = baseEntryData;
+         const { id, userId, nutritionistComment: _, ...commentInputData } = baseEntryDataForComment;
 
          const updatedComment = getNutritionistComment(commentInputData, userProfile?.healthGoal ?? null); // Pass goal
-         const finalEntryData = { ...editingEntry, nutritionistComment: updatedComment };
+         const finalEntryData = {
+             ...editingEntry,
+             timestamp: timestampToSave, // Ensure it's the Firestore Timestamp
+             nutritionistComment: updatedComment
+         };
 
         // Remove the id field before updating Firestore, as it's the document ID
         const { id: docId, ...dataToUpdate } = finalEntryData;
@@ -979,8 +1020,8 @@ export default function CalorieLogger() {
         toast({ title: "更新成功", description: "記錄項目已更新。" });
         setIsEditing(false);
         setEditingEntry(null);
-    } catch (dbError: any) {
-        console.error("更新 Firestore 時發生錯誤:", dbError);
+    } catch (dbUpdateError: any) {
+        console.error("更新 Firestore 時發生錯誤:", dbUpdateError);
         setDbError("更新記錄項目時發生錯誤。");
         toast({
             variant: 'destructive',
@@ -995,6 +1036,11 @@ export default function CalorieLogger() {
 
  const deleteLogEntry = async (id: string) => {
      if (!user) return; // Should not happen if button is visible only when logged in
+     if (!db) { // Check if db is available
+         toast({ variant: 'destructive', title: "資料庫錯誤", description: "無法連接資料庫，請稍後再試。" });
+         return;
+     }
+
      setIsLoading(true);
      setDbError(null);
 
@@ -1003,8 +1049,8 @@ export default function CalorieLogger() {
          await deleteDoc(entryRef);
          toast({ title: "刪除成功", description: "記錄項目已刪除。" });
          // Local state will update via Firestore listener
-     } catch (dbError: any) {
-         console.error("刪除 Firestore 文件時發生錯誤:", dbError);
+     } catch (dbDeleteError: any) {
+         console.error("刪除 Firestore 文件時發生錯誤:", dbDeleteError);
          setDbError("刪除記錄項目時發生錯誤。");
          toast({
              variant: 'destructive',
@@ -1021,6 +1067,11 @@ export default function CalorieLogger() {
 
   const handleProfileChange = async (field: keyof Omit<UserProfile, 'id'>, value: any) => {
       if (!isClient || !user || !userProfile) return; // Only update on client when logged in and profile loaded
+      if (!db) { // Check if db is available
+          toast({ variant: 'destructive', title: "資料庫錯誤", description: "無法連接資料庫，請稍後再試。" });
+          return;
+      }
+
 
       let processedValue = value;
       // Ensure numeric fields are stored as numbers or null
@@ -1061,6 +1112,7 @@ export default function CalorieLogger() {
       }
 
        // Optimistically update local state for responsiveness
+       const originalProfile = { ...userProfile }; // Backup original profile
        setUserProfile(prev => prev ? { ...prev, [field]: processedValue } : null);
        setDbError(null); // Clear previous DB error
 
@@ -1069,8 +1121,8 @@ export default function CalorieLogger() {
          const profileRef = doc(db, 'users', user.uid);
          await updateDoc(profileRef, { [field]: processedValue });
           // toast({ title: "設定檔已更新", description: "您的個人資料已成功儲存。" }); // Optional success toast
-       } catch (dbError: any) {
-           console.error("更新 Firestore 個人資料時發生錯誤:", dbError);
+       } catch (dbUpdateError: any) {
+           console.error("更新 Firestore 個人資料時發生錯誤:", dbUpdateError);
            setDbError("儲存個人資料變更時發生錯誤。");
            toast({
                variant: 'destructive',
@@ -1078,8 +1130,7 @@ export default function CalorieLogger() {
                description: '儲存個人資料變更時發生未預期的錯誤。'
            });
            // Revert optimistic update if Firestore save fails
-           // Note: This might cause a flicker. Consider disabling input during save.
-           setUserProfile(prev => prev ? { ...prev, [field]: userProfile[field] } : null); // Revert to original profile value
+           setUserProfile(originalProfile); // Revert to original profile value
        }
   };
 
@@ -1101,6 +1152,11 @@ export default function CalorieLogger() {
         toast({ variant: 'destructive', title: "無效數量", description: "請輸入有效的正數水量。" });
         return;
     }
+    if (!db) { // Check if db is available
+        toast({ variant: 'destructive', title: "資料庫錯誤", description: "無法連接資料庫，請稍後再試。" });
+        return;
+    }
+
 
     setIsLoading(true); // Use general loading state
     setDbError(null);
@@ -1116,8 +1172,8 @@ export default function CalorieLogger() {
         toast({ title: "已記錄飲水", description: `已新增 ${amountToAdd} 毫升。` });
         setCustomWaterAmount(''); // Clear custom input after logging
         // Local state updates via listener
-    } catch (dbError: any) {
-        console.error("寫入 Firestore 時發生錯誤:", dbError);
+    } catch (dbWriteError: any) {
+        console.error("寫入 Firestore 時發生錯誤:", dbWriteError);
         setDbError("記錄飲水時發生錯誤。");
         toast({
             variant: 'destructive',
@@ -1131,6 +1187,10 @@ export default function CalorieLogger() {
 
   const deleteWaterEntry = async (id: string) => {
       if (!isClient || !user) return;
+      if (!db) { // Check if db is available
+          toast({ variant: 'destructive', title: "資料庫錯誤", description: "無法連接資料庫，請稍後再試。" });
+          return;
+      }
       // No need for selectedDate here, Firestore listener handles updates
 
       setIsLoading(true);
@@ -1141,8 +1201,8 @@ export default function CalorieLogger() {
           await deleteDoc(entryRef);
           toast({ title: "刪除成功", description: "飲水記錄已刪除。" });
           // Local state updates via listener
-      } catch (dbError: any) {
-          console.error("刪除 Firestore 文件時發生錯誤:", dbError);
+      } catch (dbDeleteError: any) {
+          console.error("刪除 Firestore 文件時發生錯誤:", dbDeleteError);
           setDbError("刪除飲水記錄時發生錯誤。");
           toast({
               variant: 'destructive',
@@ -1157,6 +1217,11 @@ export default function CalorieLogger() {
 
   const resetTodaysWater = async () => {
       if (!isClient || !user || !selectedDate) return;
+      if (!db) { // Check if db is available
+          toast({ variant: 'destructive', title: "資料庫錯誤", description: "無法連接資料庫，請稍後再試。" });
+          return;
+      }
+
       const dateKey = format(selectedDate, 'yyyy-MM-dd');
       const entriesToDelete = waterLog[dateKey] || [];
 
@@ -1179,8 +1244,8 @@ export default function CalorieLogger() {
 
           toast({ title: "已重設", description: `${format(selectedDate, 'yyyy/MM/dd')} 飲水量已重設。` });
           // Local state updates via listener
-      } catch (dbError: any) {
-           console.error("批次刪除 Firestore 文件時發生錯誤:", dbError);
+      } catch (dbBatchError: any) {
+           console.error("批次刪除 Firestore 文件時發生錯誤:", dbBatchError);
            setDbError("重設飲水記錄時發生錯誤。");
            toast({
                variant: 'destructive',
@@ -1269,8 +1334,8 @@ export default function CalorieLogger() {
                          <div className="text-xs text-muted-foreground mt-1 flex items-center flex-wrap gap-x-2 gap-y-1">
                               <span className="flex items-center"><Clock size={12} className="mr-1"/> {entry.timestamp ? format(entry.timestamp.toDate(), 'yyyy/MM/dd HH:mm', { locale: zhTW }) : '無時間戳'}</span>
                              {entry.mealType && <span className="flex items-center"><UtensilsCrossed size={12} className="mr-1"/> {mealTypeTranslations[entry.mealType] || entry.mealType}</span>}
-                             {entry.location && <span className="flex items-center"><MapPin size={12} className="mr-1"/> <span className="truncate" title={entry.location}>{entry.location}</span></span>} {/* Use truncate here too */}
-                             {entry.cost !== null && typeof entry.cost === 'number' && ( // Check type before toFixed
+                              {entry.location && <span className="flex items-center" title={entry.location}><MapPin size={12} className="mr-1 flex-shrink-0"/> <span className="truncate">{entry.location}</span></span>} {/* Add flex-shrink-0 and title */}
+                              {entry.cost !== null && typeof entry.cost === 'number' && ( // Check type before toFixed
                                 <span className="flex items-center">
                                     <DollarSign size={12} className="mr-1"/> ${entry.cost.toFixed(2)}
                                 </span>
@@ -1503,7 +1568,9 @@ export default function CalorieLogger() {
         .filter(dateKey => waterLog[dateKey]?.length > 0)
         .map(dateKey => {
             try {
-                return new Date(dateKey); // Date key is already YYYY-MM-DD string
+                // Ensure the date string is parsed correctly, accounting for potential timezones
+                const [year, month, day] = dateKey.split('-').map(Number);
+                return new Date(year, month - 1, day); // Use Date constructor with parts for reliability
             } catch {
                 return null; // Invalid date key
             }
@@ -1525,7 +1592,7 @@ export default function CalorieLogger() {
 
      // Combine LocalStorage errors and Firestore errors
      const localErrors = [notificationSettingsError].filter(Boolean);
-     const allErrors = [...localErrors, dbError].filter(Boolean);
+     const allErrors = [authError, dbError, ...localErrors].filter(Boolean); // Include authError and dbError
 
 
      if (allErrors.length === 0) return null;
@@ -1538,8 +1605,8 @@ export default function CalorieLogger() {
      if (firstError instanceof LocalStorageError) {
          title = '客戶端儲存錯誤';
          description = firstError.message;
-     } else if (typeof firstError === 'string') { // Firestore error is a string
-         title = '資料庫錯誤';
+     } else if (typeof firstError === 'string') { // Auth/DB errors are strings
+         title = dbError ? '資料庫錯誤' : '驗證錯誤';
          description = firstError;
      }
 
@@ -1555,7 +1622,7 @@ export default function CalorieLogger() {
 
  const renderLogList = () => {
      // Render loading skeletons if auth or db data is loading
-     if (authLoading || dbLoading) {
+     if (authLoading || (user && dbLoading)) { // Show loading if auth is loading OR (user exists AND db is loading)
          return (
               <div className="mt-0 px-4 md:px-6"> {/* Add padding here for server rendering */}
                   <div className="flex justify-between items-center mb-4">
@@ -1605,9 +1672,21 @@ export default function CalorieLogger() {
                  <User className="mx-auto h-12 w-12 opacity-50 mb-4" />
                  <p className="font-semibold mb-2">請先登入</p>
                  <p className="text-sm">登入後即可查看和記錄您的卡路里。請前往「設定」分頁登入。</p>
+                 {/* Display auth error if present */}
+                 {authError && <Alert variant="destructive" className="mt-4 text-left"><AlertTitle>登入錯誤</AlertTitle><AlertDescription>{authError}</AlertDescription></Alert>}
             </div>
         )
     }
+
+    // Show general DB error if present and user is logged in
+    if (dbError) {
+        return (
+            <div className="px-4 md:px-6 mt-6">
+                 {renderStorageError()}
+            </div>
+        )
+    }
+
 
      const handleMonthChange = (month: Date) => {
         // When changing month in monthly view, set selectedDate to the first of that month
@@ -1617,7 +1696,8 @@ export default function CalorieLogger() {
 
     return (
         <div className="mt-0"> {/* Removed top margin to allow calendar to be flush */}
-            {renderStorageError() && <div className="px-4 md:px-6">{renderStorageError()}</div>} {/* Add padding to error */}
+            {/* Moved error display inside specific sections or keep it general */}
+            {/* {renderStorageError() && <div className="px-4 md:px-6">{renderStorageError()}</div>} */}
              <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-2 px-4 md:px-6"> {/* Add padding here */}
                 <h2 className="text-2xl font-semibold text-primary flex items-center gap-2 shrink-0">
                     <CalendarDays size={24}/> 卡路里記錄摘要
@@ -1672,6 +1752,11 @@ export default function CalorieLogger() {
                         day_selected: // Use this specific class for selected day styling
                           "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
                         day_today: "bg-accent text-accent-foreground", // Kept today style
+                        day_outside: // Different style for outside days
+                          "day-outside text-muted-foreground/50 aria-selected:bg-accent/30 aria-selected:text-muted-foreground/50",
+                        day_disabled: "text-muted-foreground opacity-50",
+                         day_range_middle: // Added for potential range selection styling
+                           "aria-selected:bg-accent aria-selected:text-accent-foreground",
                      }}
                      disabled={date => date > new Date() || date < new Date("1900-01-01")}
                      initialFocus
@@ -1715,9 +1800,11 @@ export default function CalorieLogger() {
             {selectedDate && (
                 <div className="px-4 md:px-6"> {/* Add padding here */}
                     <h3 className="text-lg font-medium mb-3 border-b pb-1 text-muted-foreground">
-                         {logViewMode === 'daily'
+                         {logViewMode === 'daily' && isValidDate(selectedDate)
                             ? `${format(selectedDate, 'yyyy 年 MM 月 dd 日', { locale: zhTW })} 的記錄`
-                            : `${format(selectedDate, 'yyyy 年 MM 月', { locale: zhTW })} 的記錄`
+                            : logViewMode === 'monthly' && isValidDate(selectedDate)
+                            ? `${format(selectedDate, 'yyyy 年 MM 月', { locale: zhTW })} 的記錄`
+                            : '記錄' // Fallback title
                          }
                     </h3>
                     {filteredLog.length > 0 ? (
@@ -1776,8 +1863,8 @@ export default function CalorieLogger() {
 
 
  const renderWaterTracker = () => {
-      // Show skeleton if profile is loading
-     if (dbLoading || authLoading) {
+      // Show skeleton if profile is loading (or auth is loading)
+     if (authLoading || (user && dbLoading)) {
          return <Skeleton className="h-64 w-full mt-6" />;
      }
 
@@ -1786,9 +1873,31 @@ export default function CalorieLogger() {
              <Card className="mt-6 shadow-md text-center text-muted-foreground py-10">
                 <Droplet size={32} className="mx-auto mb-3 opacity-50" />
                 <p>請先登入以追蹤飲水。</p>
+                {authError && <Alert variant="destructive" className="mt-4 text-left"><AlertTitle>錯誤</AlertTitle><AlertDescription>{authError}</AlertDescription></Alert>}
             </Card>
          )
      }
+
+      // Show error if db connection failed
+     if (dbError) {
+          return (
+              <Card className="mt-6 shadow-md text-center text-destructive py-10">
+                  <Info size={32} className="mx-auto mb-3" />
+                  <p>無法載入飲水資料：{dbError}</p>
+              </Card>
+          )
+      }
+
+       // Show message if profile is still loading or null after loading finishes
+      if (!userProfile && !dbLoading) {
+         return (
+             <Card className="mt-6 shadow-md text-center text-muted-foreground py-10">
+                 <User size={32} className="mx-auto mb-3 opacity-50" />
+                 <p>正在載入個人資料以計算建議飲水量...</p>
+                 {/* Optionally show profile creation error here too */}
+             </Card>
+         );
+      }
 
 
      return (
@@ -1901,7 +2010,7 @@ export default function CalorieLogger() {
  // New function to render the achievement summary tab content
  const renderAchievementSummary = () => {
 
-     if (authLoading || dbLoading) {
+     if (authLoading || (user && dbLoading)) {
          return (
             <>
                 <Skeleton className="h-48 w-full mt-6" />
@@ -1916,13 +2025,23 @@ export default function CalorieLogger() {
                  <Trophy className="mx-auto h-12 w-12 opacity-50 mb-4" />
                  <p className="font-semibold mb-2">請先登入</p>
                  <p className="text-sm">登入後即可查看您的成就。請前往「設定」分頁登入。</p>
+                 {authError && <Alert variant="destructive" className="mt-4 text-left"><AlertTitle>錯誤</AlertTitle><AlertDescription>{authError}</AlertDescription></Alert>}
             </div>
         )
     }
+     // Show error if db connection failed
+     if (dbError) {
+          return (
+              <div className="px-4 md:px-6 mt-6">
+                   {renderStorageError()}
+              </div>
+          )
+      }
 
 
     const yesterdayKey = format(subDays(new Date(), 1), 'yyyy-MM-dd');
-    const yesterdayTarget = calculateRecommendedWater(userProfile ?? {}) ?? defaultWaterTarget; // Use current profile for simplicity
+    // Ensure userProfile is checked before accessing its properties
+    const yesterdayTarget = calculateRecommendedWater(userProfile ?? {}) ?? defaultWaterTarget;
 
 
     const getWaterAchievementBadge = () => {
@@ -2029,21 +2148,37 @@ export default function CalorieLogger() {
 
 
  const renderProfileStats = () => {
-     if (authLoading || dbLoading) {
+     if (authLoading || (user && dbLoading)) {
          return <Skeleton className="h-64 w-full mt-6" />;
      }
      if (!user) {
          // Don't show stats if not logged in
          return null;
      }
-     if (!userProfile) {
+      // Show DB error if exists
+     if (dbError) {
+          return (
+             <Card className="mt-6 shadow-md text-center text-destructive py-10">
+                 <Info size={32} className="mx-auto mb-3" />
+                 <p>無法載入個人資料統計：{dbError}</p>
+             </Card>
+          );
+     }
+     if (!userProfile && !dbLoading) { // Check after loading finishes
          return (
               <Card className="mt-6 shadow-md text-center text-muted-foreground py-10">
                  <User size={32} className="mx-auto mb-3 opacity-50" />
-                 <p>無法載入個人資料。</p>
+                 <p>請完成個人資料以查看統計數據。</p>
+                 {/* Display profile fetch error if available */}
+                 {dbError && <Alert variant="destructive" className="mt-4 text-left"><AlertTitle>錯誤</AlertTitle><AlertDescription>{dbError}</AlertDescription></Alert>}
              </Card>
          )
      }
+     // Added null check for userProfile again before accessing properties
+     if (!userProfile) {
+        return null; // Should be covered above, but for safety
+     }
+
 
     return (
     <Card className="mt-6 shadow-md">
@@ -2054,13 +2189,8 @@ export default function CalorieLogger() {
             <CardDescription>根據您的個人資料計算的健康指標。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-             {dbError && isClient && ( // Only show profile error on client
-                 <Alert variant="destructive" className="mb-4">
-                     <Info className="h-4 w-4" />
-                     <AlertTitle>設定檔錯誤</AlertTitle>
-                     <AlertDescription>{dbError}</AlertDescription>
-                 </Alert>
-             )}
+             {/* Redundant error check, already handled above */}
+             {/* {dbError && isClient && ( ... )} */}
              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                  <span className="font-medium text-foreground">年齡：</span>
                  <span className="text-muted-foreground">{userProfile.age ?? '未設定'}</span>
@@ -2312,7 +2442,7 @@ export default function CalorieLogger() {
  // Profile Editing Section
  const renderProfileEditor = () => {
       // Show skeleton if profile is loading
-     if (dbLoading || authLoading) {
+     if (authLoading || (user && dbLoading)) {
          return <Skeleton className="h-96 w-full mt-6" />;
      }
 
@@ -2320,14 +2450,27 @@ export default function CalorieLogger() {
           // Don't show editor if not logged in
          return null;
      }
-      if (!userProfile) {
+     // Show DB error if exists
+     if (dbError) {
+          return (
+             <Card className="mt-6 shadow-md text-center text-destructive py-10">
+                 <Info size={32} className="mx-auto mb-3" />
+                 <p>無法載入個人資料編輯器：{dbError}</p>
+             </Card>
+          );
+     }
+      if (!userProfile && !dbLoading) { // Check after loading finishes
          return (
               <Card className="mt-6 shadow-md text-center text-muted-foreground py-10">
                  <User size={32} className="mx-auto mb-3 opacity-50" />
-                 <p>無法載入個人資料。</p>
+                 <p>正在載入個人資料...</p>
+                 {/* Display profile fetch error if available */}
+                 {dbError && <Alert variant="destructive" className="mt-4 text-left"><AlertTitle>錯誤</AlertTitle><AlertDescription>{dbError}</AlertDescription></Alert>}
              </Card>
          )
      }
+     // Added null check for userProfile again
+     if (!userProfile) return null;
 
     return (
      <Card className="mt-6 shadow-md">
@@ -2336,13 +2479,8 @@ export default function CalorieLogger() {
               <CardDescription>更新您的個人資訊以取得更準確的計算。</CardDescription>
          </CardHeader>
          <CardContent className="space-y-4">
-               {dbError && isClient && ( // Only show error on client
-                 <Alert variant="destructive" className="mb-4">
-                     <Info className="h-4 w-4" />
-                     <AlertTitle>設定檔儲存錯誤</AlertTitle>
-                     <AlertDescription>{dbError}</AlertDescription>
-                 </Alert>
-              )}
+               {/* Redundant error check */}
+               {/* {dbError && isClient && ( ... )} */}
              {/* Manual Input / Apple Health Toggle (Conceptual) */}
              <RadioGroup defaultValue="manual" className="flex space-x-4 mb-4">
                   <div className="flex items-center space-x-2">
@@ -2492,36 +2630,8 @@ export default function CalorieLogger() {
      </Sheet>
  );
 
-  // Add Camera View Component
-  const renderCameraView = () => (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center">
-           <video
-               ref={videoRef}
-               className="w-full h-full object-cover"
-               autoPlay
-               muted
-               playsInline
-           />
-           <Button
-               variant="ghost"
-               size="icon"
-               className="absolute top-4 right-4 h-10 w-10 rounded-full bg-black/50 text-white hover:bg-black/70"
-               onClick={() => setHasCameraPermission(null)} // Simple way to close, adjust logic if needed
-               aria-label="關閉相機"
-           >
-               <X size={24} />
-           </Button>
-           <Button
-               size="lg"
-               className="absolute bottom-10 h-16 w-16 rounded-full bg-white text-primary shadow-lg hover:bg-gray-100"
-               onClick={captureImage}
-               disabled={!isClient || hasCameraPermission !== true || isLoading}
-               aria-label="拍攝照片"
-           >
-               <Camera size={32} />
-           </Button>
-      </div>
-  );
+  // Add Camera View Component (kept for potential future use if needed)
+  // const renderCameraView = () => ( ... );
 
  // --- Main Return ---
   if (!isClient) {
@@ -2540,6 +2650,12 @@ export default function CalorieLogger() {
     <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full bg-background">
       {/* Main Content Area - Remove padding here */}
       <div className="flex-grow overflow-y-auto pb-[88px]"> {/* Added padding-bottom, removed horizontal padding */}
+            {/* Display Global Errors (Auth/DB Connection) */}
+            {(authError || dbError) && (
+                 <div className="px-4 md:px-6 sticky top-0 z-10 py-2 bg-background/90 backdrop-blur">
+                    {renderStorageError()}
+                 </div>
+            )}
             {/* Tab Contents */}
              {/* Tab 1: Logging & Summary */}
             <TabsContent value="logging" className="mt-0 h-full">
@@ -2549,20 +2665,13 @@ export default function CalorieLogger() {
                       <div className="px-4 md:px-6">{renderEstimationResult()}</div> /* Add padding here */
                  )}
 
-                 {/* Show only if logged in */}
-                 {user && renderLogList()}
-                 {!user && !authLoading && ( // Show login prompt if not logged in and not loading
-                     <div className="text-center text-muted-foreground py-10 mt-6 px-4 md:px-6">
-                         <User className="mx-auto h-12 w-12 opacity-50 mb-4" />
-                         <p className="font-semibold mb-2">請先登入</p>
-                         <p className="text-sm">登入後即可查看和記錄您的卡路里。請前往「設定」分頁登入。</p>
-                    </div>
-                 )}
+                 {/* Show log list or login prompt */}
+                 {renderLogList()}
 
 
             </TabsContent>
 
-             {/* Tab 2: Water Tracking */}
+             {/* Tab 2: Water Tracking & Profile Stats */}
             <TabsContent value="tracking" className="mt-0 h-full px-4 md:px-6"> {/* Add padding here */}
                 {renderWaterTracker()}
                 {renderProfileStats()} {/* Moved profile stats here */}
@@ -2584,7 +2693,13 @@ export default function CalorieLogger() {
                       <CardContent>
                            {authLoading && <Skeleton className="h-10 w-full" />}
                            {!authLoading && user && <UserProfileDisplay />}
-                           {!authLoading && !user && <LoginButton />}
+                           {!authLoading && !user && (
+                             <>
+                               <LoginButton />
+                               {/* Display login-specific errors */}
+                               {authError && <Alert variant="destructive" className="mt-4"><AlertTitle>登入錯誤</AlertTitle><AlertDescription>{authError}</AlertDescription></Alert>}
+                             </>
+                           )}
                       </CardContent>
                   </Card>
 
