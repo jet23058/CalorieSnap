@@ -1503,65 +1503,35 @@ export default function CalorieLogger() {
             </div>
 
 
-            {/* Calendar or Month Navigation */}
+            {/* Calendar */}
             <div className="mb-6 flex justify-center">
-                 {logViewMode === 'daily' ? (
-                     <Calendar
-                         mode="single"
-                         selected={selectedDate}
-                         onSelect={setSelectedDate}
-                         className="rounded-md border shadow-sm"
-                         disabled={date => date > new Date() || date < new Date("1900-01-01")}
-                         initialFocus
-                         locale={zhTW} // Ensure locale is passed
-                         modifiers={{
-                             calorieLogged: calorieLoggedDays,
-                             waterLogged: waterLoggedDays,
-                             selected: selectedDate ? [selectedDate] : [], // Ensure selected date is visually marked
-                         }}
-                         modifiersStyles={{
-                             calorieLogged: { fontWeight: 'bold' },
-                              // Removed conflicting border style for waterLogged
-                             // waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
-                              waterLogged: { textDecoration: 'underline', textDecorationColor: 'hsl(var(--chart-2))', textDecorationThickness: '2px' }, // Use underline instead
-                             selected: { // Style for selected date
-                                backgroundColor: 'hsl(var(--primary))',
-                                color: 'hsl(var(--primary-foreground))',
-                             },
-                         }}
-                         captionLayout="dropdown-buttons" // Use dropdowns for easier navigation
-                         fromYear={2020} // Example start year
-                         toYear={new Date().getFullYear()} // Current year
-                     />
-                 ) : (
-                     <Calendar
-                         mode="single"
-                         selected={selectedDate}
-                         onSelect={setSelectedDate} // Allow selecting a day within the month view
-                         onMonthChange={handleMonthChange} // Handle month navigation
-                         month={selectedDate} // Control the displayed month
-                         className="rounded-md border shadow-sm"
-                         disabled={date => date > new Date() || date < new Date("1900-01-01")}
-                         locale={zhTW} // Ensure locale is passed
-                         modifiers={{
-                             calorieLogged: calorieLoggedDays,
-                             waterLogged: waterLoggedDays,
-                             selected: selectedDate ? [selectedDate] : [], // Ensure selected date is visually marked
-                         }}
-                         modifiersStyles={{
-                             calorieLogged: { fontWeight: 'bold' },
-                             // waterLogged: { border: '1px solid hsl(var(--chart-2))', borderRadius: '50%' },
-                             waterLogged: { textDecoration: 'underline', textDecorationColor: 'hsl(var(--chart-2))', textDecorationThickness: '2px' }, // Use underline instead
-                             selected: { // Style for selected date
-                                backgroundColor: 'hsl(var(--primary))',
-                                color: 'hsl(var(--primary-foreground))',
-                             },
-                         }}
-                         captionLayout="dropdown-buttons" // Use dropdowns for month/year
-                         fromYear={2020} // Example start year
-                         toYear={new Date().getFullYear()} // Current year
-                     />
-                 )}
+                 <Calendar
+                     mode="single"
+                     selected={selectedDate}
+                     onSelect={setSelectedDate}
+                     className="rounded-md border shadow-sm w-full sm:w-auto p-4" // Make calendar wider
+                     disabled={date => date > new Date() || date < new Date("1900-01-01")}
+                     initialFocus
+                     locale={zhTW} // Ensure locale is passed
+                     modifiers={{
+                         calorieLogged: calorieLoggedDays,
+                         waterLogged: waterLoggedDays,
+                         selected: selectedDate ? [selectedDate] : [], // Ensure selected date is visually marked
+                     }}
+                     modifiersStyles={{
+                         calorieLogged: { fontWeight: 'bold' },
+                         waterLogged: { textDecoration: 'underline', textDecorationColor: 'hsl(var(--chart-2))', textDecorationThickness: '2px' }, // Use underline instead
+                         selected: { // Style for selected date
+                            backgroundColor: 'hsl(var(--primary))',
+                            color: 'hsl(var(--primary-foreground))',
+                         },
+                     }}
+                     captionLayout="dropdown-buttons" // Use dropdowns for easier navigation
+                     fromYear={2020} // Example start year
+                     toYear={new Date().getFullYear()} // Current year
+                     onMonthChange={logViewMode === 'monthly' ? handleMonthChange : undefined} // Only handle month change in monthly view
+                     month={logViewMode === 'monthly' ? selectedDate : undefined} // Control month in monthly view
+                 />
             </div>
 
              {/* Sorting Options (Monthly View Only) */}
@@ -2320,64 +2290,6 @@ export default function CalorieLogger() {
             {/* Tab Contents */}
              {/* Tab 1: Logging & Summary */}
             <TabsContent value="logging" className="mt-0 h-full">
-                 {/* Only show camera card if not actively cropping or viewing estimation */}
-                 {!imageSrc && !isCropping && (
-                    <Card className="mb-6 shadow-md">
-                        <CardHeader>
-                             <CardTitle className="flex items-center gap-2">
-                                <Camera size={24} /> 點擊選擇上傳影像或拍攝照片
-                             </CardTitle>
-                            <CardDescription>使用您的相機拍攝食物照片，或從您的裝置上傳影像。</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                             {/* Loading and Error States for camera permission */}
-                             {hasCameraPermission === null && !isClient && ( // Show skeleton on server
-                                <div className="relative aspect-video w-full rounded-md overflow-hidden border bg-muted mb-4 flex items-center justify-center">
-                                     <Skeleton className="h-full w-full" />
-                                </div>
-                             )}
-                             {hasCameraPermission === null && isClient && ( // Show spinner on client while checking
-                                <div className="relative aspect-video w-full rounded-md overflow-hidden border bg-muted mb-4 flex items-center justify-center">
-                                    <LoadingSpinner />
-                                </div>
-                            )}
-                            {/* Camera Preview Area - only shown if permission granted */}
-                            {hasCameraPermission === true && (
-                                <div className="relative aspect-video w-full rounded-md overflow-hidden border bg-muted mb-4">
-                                    <video
-                                        ref={videoRef}
-                                        className="w-full h-full object-cover"
-                                        autoPlay
-                                        muted
-                                        playsInline
-                                    />
-                                </div>
-                            )}
-                             {/* No Permission State */}
-                            {hasCameraPermission === false && (
-                                 <div className="relative aspect-video w-full rounded-md overflow-hidden border bg-muted mb-4 flex flex-col items-center justify-center text-center p-4">
-                                     <Camera size={48} className="text-muted-foreground opacity-50 mb-2" />
-                                     <p className="text-muted-foreground">相機無法使用或權限遭拒。</p>
-                                     <p className="text-xs text-muted-foreground mt-1">請允許相機存取或使用上傳按鈕。</p>
-                                 </div>
-                            )}
-                             {/* Loading and Error States for estimation */}
-                             {isLoading && estimation === null && ( // Only show general loading when no prior estimation exists
-                                <div className="mt-4 flex justify-center items-center gap-2 text-primary">
-                                    <LoadingSpinner />
-                                    <span>正在估算卡路里...</span>
-                                </div>
-                            )}
-                             {error && isClient && ( // Only show error on client
-                               <Alert variant="destructive" className="mt-4">
-                                 <AlertTitle>錯誤</AlertTitle>
-                                 <AlertDescription>{error}</AlertDescription>
-                               </Alert>
-                             )}
-                        </CardContent>
-                    </Card>
-                 )}
-
 
                  {/* Estimation Result (only show if imageSrc exists and not cropping, and on client) */}
                  {isClient && imageSrc && !isCropping && renderEstimationResult()}
