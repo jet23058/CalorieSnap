@@ -1,8 +1,7 @@
 // src/lib/firebase/config.ts
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
-// import { getAnalytics } from "firebase/analytics"; // Optional: If you use Analytics
+import { getFirestore, Firestore, initializeFirestore, persistentLocalCache, FirestoreSettings, CACHE_SIZE_UNLIMITED } from 'firebase/firestore'; // Import Firestore persistence functions
 
 // Log environment variables being read (for debugging)
 console.log("Reading Firebase config from environment variables:");
@@ -31,9 +30,9 @@ console.log("Firebase config object to be used for initialization:", {
 });
 
 
-type FirebaseConfigKeys = keyof Omit<typeof firebaseConfig, 'measurementId'>; // Exclude optional measurementId
+type FirebaseConfigKeys = keyof typeof firebaseConfig;
 
-// --- List of required Firebase environment variables (excluding optional measurementId) ---
+// --- List of required Firebase environment variables ---
 const REQUIRED_FIREBASE_CONFIG_KEYS: FirebaseConfigKeys[] = [
   'apiKey',
   'authDomain',
@@ -41,6 +40,7 @@ const REQUIRED_FIREBASE_CONFIG_KEYS: FirebaseConfigKeys[] = [
   'storageBucket',
   'messagingSenderId',
   'appId',
+  // 'measurementId' is optional, so not included here
 ];
 
 // --- Enhanced Validation ---
@@ -71,58 +71,67 @@ if (missingConfigKeys.length > 0) {
 
 
 // --- Initialize Firebase ---
-let app: FirebaseApp;
+let app: FirebaseApp | null = null; // Initialize as null
 // Check if Firebase configuration seems minimally viable before initializing
 // We check this even in development after the warning
 const isConfigPotentiallyViable = missingConfigKeys.length === 0;
 
-if (!getApps().length) {
-  if (isConfigPotentiallyViable) {
-      try {
-          app = initializeApp(firebaseConfig);
-          console.log("Firebase initialized successfully."); // Add success log
-          // Initialize Analytics if needed
-          // if (typeof window !== 'undefined' && firebaseConfig.measurementId) {
-          //   getAnalytics(app);
-          // }
-      } catch (error) {
-           console.error("!!! Error initializing Firebase App:", error);
-           // Re-throw or handle error based on application needs
-           throw error; // Re-throwing to make sure the failure is obvious
-      }
-  } else {
-      console.error("!!! Firebase initialization skipped due to incomplete configuration. !!!");
-      // Set app to a non-functional state or handle appropriately
-      // Depending on the app structure, this might require adjustments elsewhere
-      // to prevent errors when `auth` or `db` are accessed.
-      // For now, we let the subsequent auth/db initialization fail clearly.
-  }
-} else {
-  app = getApp();
-  console.log("Firebase app already initialized."); // Add log for existing app
+try {
+    if (!getApps().length) {
+        if (isConfigPotentiallyViable) {
+            app = initializeApp(firebaseConfig);
+            console.log("Firebase initialized successfully.");
+        } else {
+            console.error("!!! Firebase initialization skipped due to incomplete configuration. !!!");
+        }
+    } else {
+        app = getApp();
+        console.log("Firebase app already initialized.");
+    }
+} catch (error) {
+    console.error("!!! Error initializing Firebase App:", error);
+    // Set app to null explicitly on error
+    app = null;
 }
 
+
 // --- Initialize Auth and Firestore ---
-// These will only be attempted if `app` was successfully initialized or retrieved.
 let auth: Auth | null = null; // Initialize as null
 let db: Firestore | null = null; // Initialize as null
 
-if (app) { // Only proceed if app exists
+if (app) { // Only proceed if app was successfully initialized or retrieved.
     try {
         auth = getAuth(app);
-        db = getFirestore(app);
-        console.log("Firebase Auth and Firestore services obtained.");
+        console.log("Firebase Auth service obtained.");
     } catch (error) {
-        console.error("!!! Error getting Firebase Auth or Firestore instance:", error);
-        // Handle the error appropriately, e.g., by keeping auth/db as null
-        // The application needs to handle cases where auth or db might be null.
-        // Throwing here might be too disruptive if the app could partially function.
-        // For now, we log the error, auth/db remain null.
+        console.error("!!! Error getting Firebase Auth instance:", error);
+        auth = null; // Ensure auth is null if getting it fails
+    }
+
+    try {
+        // Initialize Firestore with persistent cache settings
+        const settings: FirestoreSettings = {
+            localCache: persistentLocalCache({ cacheSizeBytes: CACHE_SIZE_UNLIMITED }), // Enable persistent cache
+            // You might want to adjust cacheSizeBytes later if needed, but UNLIMITED is a good start
+        };
+        db = initializeFirestore(app, settings);
+        console.log("Firestore with persistence enabled.");
+    } catch (error) {
+        console.error("!!! Error initializing Firestore with persistence:", error);
+        // Attempt fallback to default Firestore initialization if persistence fails
+        try {
+            console.warn("Attempting to initialize Firestore without persistence...");
+            db = getFirestore(app);
+            console.log("Firestore initialized without persistence (fallback).");
+        } catch (fallbackError) {
+            console.error("!!! Failed to initialize Firestore even without persistence:", fallbackError);
+            db = null; // Ensure db is null if all initialization fails
+        }
     }
 } else {
     console.error("!!! Cannot get Auth/Firestore because Firebase App is not initialized. !!!");
 }
 
 
-// Export potentially null auth and db, requiring checks where used.
+// Export potentially null app, auth and db, requiring checks where used.
 export { app, auth, db };
