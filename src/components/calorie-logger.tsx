@@ -31,7 +31,7 @@ import {
   Trash, // Added for deleting water entries
   Cat, // Added for achievement badge
   Trophy, // Added for achievement section title
-  Image as ImageIcon, // Added for photo achievement badge
+  ImageIcon, // Added for photo achievement badge
   NotebookText, // Icon for Nutritionist Comments
   ArrowDownUp, // Icon for sorting
   Target, // Icon for Health Goal
@@ -324,7 +324,7 @@ export default function CalorieLogger() {
   // Fetch location on initial client mount
   useEffect(() => {
       if (isClient) {
-          fetchCurrentLocation();
+          // fetchCurrentLocation(); // Consider if location is needed on initial load or only when logging
       }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient]); // Only depend on isClient to run once on mount
@@ -349,12 +349,12 @@ export default function CalorieLogger() {
                       title: '相機存取遭拒',
                       description: '請在您的瀏覽器設定中啟用相機權限以使用此應用程式。',
                   });
-                  setCurrentLocation("相機權限遭拒，無法取得位置"); // Indicate location blocked by camera denial
+                  // setCurrentLocation("相機權限遭拒，無法取得位置"); // Indicate location blocked by camera denial
               }
           } else {
               setHasCameraPermission(false);
               if (typeof window !== 'undefined') { // Only set location/log/toast on client
-                  setCurrentLocation("不支援媒體裝置");
+                  // setCurrentLocation("不支援媒體裝置");
                   console.warn('此瀏覽器不支援 getUserMedia。');
                   toast({
                       variant: 'destructive',
@@ -690,13 +690,26 @@ export default function CalorieLogger() {
     // Allow logging even if only imageSrc exists (before estimation finishes or if it fails)
     if (imageSrc) {
         const currentEstimation = estimation; // Capture current estimation state
+        // Fetch location *just before* logging, if not already available or errored
+        let locationToLog = currentLocation;
+        if (!locationToLog || locationToLog === '正在獲取...' || locationToLog.startsWith('無法') || locationToLog.startsWith('瀏覽器')) {
+            if (!isFetchingLocation) { // Avoid concurrent fetches
+                fetchCurrentLocation(); // Fetch it now
+                // Note: This is async, so the location might not be available immediately for *this* log entry.
+                // We might need to update the entry later or accept it might be null.
+                // For simplicity here, we log the current state, which might be null or an error message.
+                locationToLog = currentLocation; // Use the state as is for this log
+            }
+        }
+
+
         const baseEntry: Omit<CalorieLogEntry, 'id' | 'nutritionistComment'> = {
             foodItem: currentEstimation?.foodItem || "未命名食物", // Use default placeholder
             calorieEstimate: currentEstimation?.isFoodItem ? (currentEstimation.calorieEstimate ?? 0) : 0, // Use 0 if not food or undefined
             imageUrl: imageSrc, // Log the (potentially cropped) image
             timestamp: new Date().toISOString(),
             mealType: null, // User can set this later
-            location: currentLocation && currentLocation !== '正在獲取...' && !currentLocation.startsWith('無法') && !currentLocation.startsWith('瀏覽器') ? currentLocation : null, // Log location if available and not an error/loading state
+            location: locationToLog && locationToLog !== '正在獲取...' && !locationToLog.startsWith('無法') && !locationToLog.startsWith('瀏覽器') ? locationToLog : null, // Log location if available and not an error/loading state
             cost: null,
             confidence: currentEstimation?.isFoodItem ? (currentEstimation.confidence ?? 0) : 0, // Use 0 if not food or undefined
         };
@@ -715,10 +728,11 @@ export default function CalorieLogger() {
         // Use the setter function from useLocalStorage
         setCalorieLog(prevLog => {
             // Basic check to prevent excessively large logs
-            if (prevLog.length >= 100) { // Example limit: 100 entries
+            if (prevLog.length >= 1000) { // Example limit: 1000 entries
                 // Optionally remove the oldest entry
-                // return [newEntry, ...prevLog.slice(0, -1)];
-                throw new LocalStorageError('記錄已滿，無法新增更多項目。請刪除一些舊記錄。');
+                 // return [newEntry, ...prevLog.slice(0, -1)];
+                 toast({ variant: 'destructive', title: '記錄已滿', description: '記錄數量已達上限，請刪除一些舊記錄。' });
+                 return prevLog; // Prevent adding new entry
             }
             return [newEntry, ...prevLog];
         });
@@ -737,22 +751,14 @@ export default function CalorieLogger() {
           fileInputRef.current.value = ""; // Reset file input
         }
       } catch (storageError: any) {
-         // Handle errors from useLocalStorage
-         if (storageError instanceof LocalStorageError) {
-             toast({
-                 variant: 'destructive',
-                 title: '儲存錯誤',
-                 description: storageError.message || '無法儲存卡路里記錄。儲存空間可能已滿或發生錯誤。'
-             });
-         } else {
-              toast({
-                 variant: 'destructive',
-                 title: '儲存錯誤',
-                 description: '儲存卡路里記錄時發生未預期的錯誤。'
-             });
-         }
-          // Log the detailed error for debugging
-          console.error("儲存記錄時發生錯誤:", storageError);
+         // Handle errors from useLocalStorage setter directly
+         // (useLocalStorage hook now passes the error back instead of throwing)
+         toast({
+             variant: 'destructive',
+             title: '儲存錯誤',
+             description: storageError.message || '儲存卡路里記錄時發生未預期的錯誤。'
+         });
+         console.error("儲存記錄時發生錯誤:", storageError);
       }
     } else {
       toast({
@@ -835,12 +841,13 @@ export default function CalorieLogger() {
         setIsEditing(false);
         setEditingEntry(null);
       } catch (storageError: any) {
-          if (storageError instanceof LocalStorageError) {
-             toast({ variant: 'destructive', title: '儲存錯誤', description: storageError.message });
-          } else {
-             toast({ variant: 'destructive', title: '儲存錯誤', description: '儲存更新時發生未預期的錯誤。' });
-          }
-          console.error("儲存編輯時發生錯誤:", storageError);
+         // Handle potential errors from the setter
+         toast({
+             variant: 'destructive',
+             title: '儲存錯誤',
+             description: storageError.message || '儲存更新時發生未預期的錯誤。'
+         });
+         console.error("儲存編輯時發生錯誤:", storageError);
       }
     }
   };
@@ -851,11 +858,12 @@ export default function CalorieLogger() {
          setCalorieLog(prevLog => prevLog.filter(entry => entry.id !== id));
          toast({ title: "刪除成功", description: "記錄項目已刪除。" });
       } catch (storageError: any) {
-           if (storageError instanceof LocalStorageError) {
-              toast({ variant: 'destructive', title: '刪除錯誤', description: storageError.message });
-           } else {
-              toast({ variant: 'destructive', title: '刪除錯誤', description: '刪除項目時發生未預期的錯誤。' });
-           }
+           // Handle potential errors from the setter
+           toast({
+               variant: 'destructive',
+               title: '刪除錯誤',
+               description: storageError.message || '刪除項目時發生未預期的錯誤。'
+           });
            console.error("刪除記錄項目時發生錯誤:", storageError);
       }
   };
@@ -906,12 +914,12 @@ export default function CalorieLogger() {
          // Clear error on successful update attempt (even if value is null)
          // Note: useLocalStorage handles actual storage errors.
        } catch (storageError: any) {
-           // This catch block might not be necessary if useLocalStorage handles all errors
-           if (storageError instanceof LocalStorageError) {
-               toast({ variant: 'destructive', title: '設定檔儲存錯誤', description: storageError.message });
-           } else {
-               toast({ variant: 'destructive', title: '設定檔儲存錯誤', description: '更新個人資料時發生未預期的錯誤。' });
-           }
+           // Handle potential errors from the setter
+           toast({
+               variant: 'destructive',
+               title: '設定檔儲存錯誤',
+               description: storageError.message || '更新個人資料時發生未預期的錯誤。'
+           });
            console.error("儲存個人資料時發生錯誤:", storageError);
        }
   };
@@ -942,8 +950,9 @@ export default function CalorieLogger() {
            setWaterLog(prevLog => {
                const todaysEntries = prevLog[today] || [];
                // Basic check to prevent excessively large logs for a single day
-               if (todaysEntries.length >= 50) { // Example limit: 50 water entries per day
-                   throw new LocalStorageError('今日飲水記錄已滿。');
+               if (todaysEntries.length >= 100) { // Example limit: 100 water entries per day
+                   toast({ variant: 'destructive', title: '記錄已滿', description: '今日飲水記錄已達上限。' });
+                   return prevLog; // Prevent adding new entry
                }
                return {
                    ...prevLog,
@@ -953,11 +962,12 @@ export default function CalorieLogger() {
            toast({ title: "已記錄飲水", description: `已新增 ${amountToAdd} 毫升。` });
            setCustomWaterAmount(''); // Clear custom input after logging
        } catch (storageError: any) {
-           if (storageError instanceof LocalStorageError) {
-               toast({ variant: 'destructive', title: '記錄錯誤', description: storageError.message });
-           } else {
-               toast({ variant: 'destructive', title: '記錄錯誤', description: '記錄飲水時發生未預期的錯誤。' });
-           }
+           // Handle potential errors from the setter
+           toast({
+               variant: 'destructive',
+               title: '記錄錯誤',
+               description: storageError.message || '記錄飲水時發生未預期的錯誤。'
+           });
            console.error("記錄飲水時發生錯誤:", storageError);
        }
    };
@@ -977,11 +987,12 @@ export default function CalorieLogger() {
           });
           toast({ title: "刪除成功", description: "飲水記錄已刪除。" });
       } catch (storageError: any) {
-          if (storageError instanceof LocalStorageError) {
-              toast({ variant: 'destructive', title: '刪除錯誤', description: storageError.message });
-          } else {
-              toast({ variant: 'destructive', title: '刪除錯誤', description: '刪除飲水記錄時發生未預期的錯誤。' });
-          }
+          // Handle potential errors from the setter
+          toast({
+              variant: 'destructive',
+              title: '刪除錯誤',
+              description: storageError.message || '刪除飲水記錄時發生未預期的錯誤。'
+          });
           console.error("刪除飲水記錄時發生錯誤:", storageError);
       }
   };
@@ -994,11 +1005,12 @@ export default function CalorieLogger() {
           setWaterLog(prevLog => ({ ...prevLog, [dateKey]: [] })); // Reset to empty array
           toast({ title: "已重設", description: `${format(selectedDate, 'yyyy/MM/dd')} 飲水量已重設。` });
       } catch (storageError: any) {
-          if (storageError instanceof LocalStorageError) {
-              toast({ variant: 'destructive', title: '重設錯誤', description: storageError.message });
-          } else {
-              toast({ variant: 'destructive', title: '重設錯誤', description: '重設飲水時發生未預期的錯誤。' });
-          }
+           // Handle potential errors from the setter
+           toast({
+               variant: 'destructive',
+               title: '重設錯誤',
+               description: storageError.message || '重設飲水時發生未預期的錯誤。'
+           });
           console.error("重設飲水時發生錯誤:", storageError);
       }
   };
@@ -1030,22 +1042,23 @@ export default function CalorieLogger() {
   // --- Rendering ---
 
   const renderLogEntry = (entry: CalorieLogEntry) => (
-    <React.Fragment key={entry.id}>
+    // Using Dialog as the root here for the modal functionality
+    <Dialog key={entry.id}>
         <Card className="mb-4 overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
             <CardHeader className="p-4">
                 <div className="flex items-start space-x-4">
                     {/* Image Thumbnail Button Triggering Modal */}
-                    <DialogTrigger asChild>
-                         <button
+                     <DialogTrigger asChild>
+                        <button
                              className={cn(
                                  "relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center rounded-md bg-muted border text-muted-foreground flex-shrink-0 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity",
                                  !entry.imageUrl && "cursor-default hover:opacity-100" // Disable hover effect if no image
                              )}
                              onClick={(e) => {
-                                 if (entry.imageUrl) {
-                                     e.stopPropagation();
-                                     setShowImageModal(entry.imageUrl);
+                                 if (!entry.imageUrl) {
+                                     e.preventDefault(); // Prevent dialog from opening if no image
                                  }
+                                 // Implicitly handled by DialogTrigger for opening
                              }}
                              aria-label={entry.imageUrl ? "放大圖片" : "無圖片"}
                              disabled={!entry.imageUrl} // Disable button if no image
@@ -1062,7 +1075,7 @@ export default function CalorieLogger() {
                                 <UtensilsCrossed className="w-6 h-6 opacity-50" />
                             )}
                         </button>
-                    </DialogTrigger>
+                     </DialogTrigger>
 
                     {/* Main Info */}
                     <div className="flex-grow overflow-hidden">
@@ -1140,7 +1153,19 @@ export default function CalorieLogger() {
                  </Accordion>
              )}
         </Card>
-    </React.Fragment>
+         {/* Image Zoom Modal Content */}
+         {entry.imageUrl && (
+             <DialogContent className="max-w-3xl p-2">
+                 {/* eslint-disable-next-line @next/next/no-img-element */}
+                 <img src={entry.imageUrl} alt="放大檢視" className="max-w-full max-h-[80vh] object-contain rounded-md" />
+                 <DialogClose asChild>
+                     <Button variant="ghost" size="icon" className="absolute top-3 right-3 h-7 w-7 bg-background/50 hover:bg-background/80 rounded-full" aria-label="關閉">
+                         <X size={18} />
+                     </Button>
+                 </DialogClose>
+             </DialogContent>
+         )}
+    </Dialog>
  );
 
 
@@ -1968,12 +1993,16 @@ export default function CalorieLogger() {
      </Dialog>
  );
 
-  const renderImageModal = () => (
-    <Dialog open={!!showImageModal} onOpenChange={() => setShowImageModal(null)}>
+ // Moved renderImageModal outside the CalorieLogger component scope
+ // This needs to be accessible globally or passed down if needed elsewhere,
+ // but typically Dialogs are rendered at the top level or near the trigger.
+ // For simplicity, we keep it here but outside the main return statement.
+ const renderImageZoomModal = (imageUrl: string | null, onClose: () => void) => (
+    <Dialog open={!!imageUrl} onOpenChange={onClose}>
         <DialogContent className="max-w-3xl p-2">
-             {showImageModal && (
+             {imageUrl && (
                  // eslint-disable-next-line @next/next/no-img-element
-                <img src={showImageModal} alt="放大檢視" className="max-w-full max-h-[80vh] object-contain rounded-md" />
+                <img src={imageUrl} alt="放大檢視" className="max-w-full max-h-[80vh] object-contain rounded-md" />
              )}
              <DialogClose asChild>
                   <Button variant="ghost" size="icon" className="absolute top-3 right-3 h-7 w-7 bg-background/50 hover:bg-background/80 rounded-full" aria-label="關閉">
@@ -2190,9 +2219,10 @@ export default function CalorieLogger() {
 
 
   return (
-    <Dialog> {/* Main Dialog wrapper for modals */}
-        <Tabs defaultValue="logging" className="w-full">
-             <TabsList className="grid w-full grid-cols-4 sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b"> {/* Changed to 4 columns */}
+    // Changed to flex layout for app structure
+    <div className="flex flex-col h-full bg-background">
+        <Tabs defaultValue="logging" className="flex flex-col flex-grow overflow-hidden">
+            <TabsList className="grid w-full grid-cols-4 sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b"> {/* Changed to 4 columns */}
                  <TabsTrigger value="logging" className="flex-1 text-center px-1">
                      <Camera className="mr-1 sm:mr-2 h-4 w-4 inline-block" />
                      <span className="truncate hidden sm:inline">拍照記錄 & 摘要</span>
@@ -2216,115 +2246,116 @@ export default function CalorieLogger() {
                  </TabsTrigger>
             </TabsList>
 
-             {/* Tab 1: Logging & Summary */}
-            <TabsContent value="logging" className="pt-4">
-                 <Card className="mb-6 shadow-md">
-                    <CardHeader>
-                         <CardTitle className="flex items-center gap-2">
-                             <Camera size={24} /> 點擊選擇上傳影像或拍攝照片
-                         </CardTitle>
-                        <CardDescription>使用您的相機拍攝食物照片，或從您的裝置上傳影像。</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {/* Camera Preview */}
-                        <div className="relative aspect-video w-full rounded-md overflow-hidden border bg-muted mb-4">
-                            <video
-                                ref={videoRef}
-                                className={cn(
-                                    "w-full h-full object-cover transition-opacity duration-300",
-                                    hasCameraPermission === false ? 'opacity-0 pointer-events-none' : 'opacity-100'
+             {/* Tab Contents with overflow */}
+             <div className="flex-grow overflow-y-auto p-4 md:p-6">
+                {/* Tab 1: Logging & Summary */}
+                <TabsContent value="logging">
+                     <Card className="mb-6 shadow-md">
+                        <CardHeader>
+                             <CardTitle className="flex items-center gap-2">
+                                 <Camera size={24} /> 點擊選擇上傳影像或拍攝照片
+                             </CardTitle>
+                            <CardDescription>使用您的相機拍攝食物照片，或從您的裝置上傳影像。</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {/* Camera Preview */}
+                            <div className="relative aspect-video w-full rounded-md overflow-hidden border bg-muted mb-4">
+                                <video
+                                    ref={videoRef}
+                                    className={cn(
+                                        "w-full h-full object-cover transition-opacity duration-300",
+                                        hasCameraPermission === false ? 'opacity-0 pointer-events-none' : 'opacity-100'
+                                    )}
+                                    autoPlay
+                                    muted
+                                    playsInline // Important for mobile
+                                    // Consider adding poster attribute for initial state
+                                />
+                                 {/* Loading State */}
+                                 {hasCameraPermission === null && (
+                                    <div className="absolute inset-0 flex items-center justify-center bg-muted">
+                                        <LoadingSpinner />
+                                    </div>
                                 )}
-                                autoPlay
-                                muted
-                                playsInline // Important for mobile
-                                // Consider adding poster attribute for initial state
-                            />
-                             {/* Loading State */}
-                             {hasCameraPermission === null && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-muted">
+                                 {/* No Permission State */}
+                                {hasCameraPermission === false && (
+                                     <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 bg-muted">
+                                         <Camera size={48} className="text-muted-foreground opacity-50 mb-2" />
+                                         <p className="text-muted-foreground">相機無法使用或權限遭拒。</p>
+                                         <p className="text-xs text-muted-foreground mt-1">請允許相機存取或使用上傳按鈕。</p>
+                                          {/* Optionally add a button to re-request permission if needed */}
+                                         {/* <Button onClick={getCameraPermission} variant="outline" size="sm" className="mt-2">重試</Button> */}
+                                     </div>
+                                )}
+                            </div>
+
+                            {/* Capture/Upload Buttons */}
+                            <div className="flex flex-col sm:flex-row gap-2">
+                                 <Button onClick={captureImage} disabled={!isClient || hasCameraPermission !== true || isLoading} className="flex-1">
+                                     <Camera className="mr-2 h-4 w-4" /> 拍攝照片
+                                 </Button>
+                                <Button onClick={() => fileInputRef.current?.click()} disabled={!isClient || isLoading} variant="outline" className="flex-1">
+                                    <UploadCloud className="mr-2 h-4 w-4" /> 上傳影像
+                                </Button>
+                                <Input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    onChange={uploadImage}
+                                    accept="image/*" // Specify image types
+                                    className="hidden"
+                                    aria-hidden="true" // Hide from accessibility tree
+                                />
+                            </div>
+
+                            {/* Loading and Error States */}
+                            {isLoading && estimation === null && ( // Only show general loading when no prior estimation exists
+                                <div className="mt-4 flex justify-center items-center gap-2 text-primary">
                                     <LoadingSpinner />
+                                    <span>正在估算卡路里...</span>
                                 </div>
                             )}
-                             {/* No Permission State */}
-                            {hasCameraPermission === false && (
-                                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 bg-muted">
-                                     <Camera size={48} className="text-muted-foreground opacity-50 mb-2" />
-                                     <p className="text-muted-foreground">相機無法使用或權限遭拒。</p>
-                                     <p className="text-xs text-muted-foreground mt-1">請允許相機存取或使用上傳按鈕。</p>
-                                      {/* Optionally add a button to re-request permission if needed */}
-                                     {/* <Button onClick={getCameraPermission} variant="outline" size="sm" className="mt-2">重試</Button> */}
-                                 </div>
-                            )}
-                        </div>
+                             {error && isClient && ( // Only show error on client
+                               <Alert variant="destructive" className="mt-4">
+                                 <AlertTitle>錯誤</AlertTitle>
+                                 <AlertDescription>{error}</AlertDescription>
+                               </Alert>
+                             )}
+                        </CardContent>
+                    </Card>
 
-                        {/* Capture/Upload Buttons */}
-                        <div className="flex flex-col sm:flex-row gap-2">
-                             <Button onClick={captureImage} disabled={!isClient || hasCameraPermission !== true || isLoading} className="flex-1">
-                                 <Camera className="mr-2 h-4 w-4" /> 拍攝照片
-                             </Button>
-                            <Button onClick={() => fileInputRef.current?.click()} disabled={!isClient || isLoading} variant="outline" className="flex-1">
-                                <UploadCloud className="mr-2 h-4 w-4" /> 上傳影像
-                            </Button>
-                            <Input
-                                type="file"
-                                ref={fileInputRef}
-                                onChange={uploadImage}
-                                accept="image/*" // Specify image types
-                                className="hidden"
-                                aria-hidden="true" // Hide from accessibility tree
-                            />
-                        </div>
+                     {/* Estimation Result (only show if imageSrc exists and not cropping, and on client) */}
+                     {isClient && imageSrc && !isCropping && renderEstimationResult()}
 
-                        {/* Loading and Error States */}
-                        {isLoading && estimation === null && ( // Only show general loading when no prior estimation exists
-                            <div className="mt-4 flex justify-center items-center gap-2 text-primary">
-                                <LoadingSpinner />
-                                <span>正在估算卡路里...</span>
-                            </div>
-                        )}
-                         {error && isClient && ( // Only show error on client
-                           <Alert variant="destructive" className="mt-4">
-                             <AlertTitle>錯誤</AlertTitle>
-                             <AlertDescription>{error}</AlertDescription>
-                           </Alert>
-                         )}
-                    </CardContent>
-                </Card>
+                     {/* Calorie Log Summary */}
+                    {renderLogList()}
 
-                 {/* Estimation Result (only show if imageSrc exists and not cropping, and on client) */}
-                 {isClient && imageSrc && !isCropping && renderEstimationResult()}
+                </TabsContent>
 
-                 {/* Calorie Log Summary */}
-                {renderLogList()}
+                 {/* Tab 2: Water Tracking */}
+                <TabsContent value="tracking">
+                    {renderWaterTracker()}
+                </TabsContent>
 
-            </TabsContent>
+                {/* Tab 3: Achievements */}
+                <TabsContent value="achievements"> {/* Changed value to "achievements" */}
+                     {renderAchievementSummary()}
+                </TabsContent>
 
-             {/* Tab 2: Water Tracking */}
-            <TabsContent value="tracking" className="pt-4">
-                {renderWaterTracker()}
-            </TabsContent>
-
-            {/* Tab 3: Achievements */}
-            <TabsContent value="achievements" className="pt-4"> {/* Changed value to "achievements" */}
-                 {renderAchievementSummary()}
-            </TabsContent>
-
-             {/* Tab 4: Settings */}
-             <TabsContent value="settings" className="pt-4">
-                 {renderProfileEditor()}
-                 {renderProfileStats()} {/* Moved profile stats here */}
-                 {renderNotificationSettingsTrigger()}
-             </TabsContent>
+                 {/* Tab 4: Settings */}
+                 <TabsContent value="settings">
+                     {renderProfileEditor()}
+                     {renderProfileStats()} {/* Moved profile stats here */}
+                     {renderNotificationSettingsTrigger()}
+                 </TabsContent>
+            </div>
         </Tabs>
 
         {/* Render Modals outside TabsContent for proper stacking */}
+        {/* Image Zoom modal needs state passed */}
+        {renderImageZoomModal(showImageModal, () => setShowImageModal(null))}
         {renderEditDialog()}
-        {renderImageModal()}
         {renderCropDialog()}
-    </Dialog>
+        <canvas ref={canvasRef} className="hidden" /> {/* Keep canvas for image capture */}
+    </div>
   );
 }
-
-    
-
-    

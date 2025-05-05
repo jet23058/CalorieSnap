@@ -24,8 +24,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-Hant">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+    <html lang="zh-Hant" className="h-full"> {/* Set language and full height */}
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased h-full`}> {/* Full height */}
         {children}
         <Toaster /> {/* Add Toaster here */}
       </body>
