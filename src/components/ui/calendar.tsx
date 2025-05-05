@@ -31,7 +31,7 @@ function Calendar({
         month: "space-y-4 w-full", // Added w-full
         caption: "flex justify-center pt-1 relative items-center",
         caption_label: "text-sm font-medium hidden", // Hide default label when using dropdowns
-        caption_dropdowns: "flex justify-center gap-2 items-center", // Style for dropdown container
+        caption_dropdowns: "flex justify-center gap-2 items-center w-full px-10", // Added w-full and padding
         nav: "space-x-1 flex items-center",
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
@@ -44,7 +44,14 @@ function Calendar({
         head_cell:
           "text-muted-foreground rounded-md w-[14.28%] font-normal text-[0.8rem]", // Use percentages for width
         row: "flex w-full mt-2 justify-around", // Distribute cells evenly
-        cell: "h-9 w-[14.28%] text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20", // Use percentages
+        cell: cn(
+          "h-9 w-[14.28%] text-center text-sm p-0 relative", // Use percentages
+          "[&:has([aria-selected])]:bg-accent [&:has([aria-selected])]:rounded-md", // Apply accent and rounding to the cell itself when selected
+          "[&:has([aria-selected].day-outside)]:bg-accent/50", // Style for selected outside days
+          "[&:has([aria-selected].day-range-end)]:rounded-r-md",
+          "first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md"
+          // Removed focus-within styles causing orange ring
+        ),
         day: cn(
           buttonVariants({ variant: "ghost" }),
           "h-9 w-full p-0 font-normal aria-selected:opacity-100", // Make day button full width of cell
@@ -53,7 +60,7 @@ function Calendar({
         ),
         day_range_end: "day-range-end",
         day_selected:
-          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground", // Removed focus: styles that might conflict
+          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground", // Standard selected day style
         day_today: "bg-accent text-accent-foreground", // Kept today style
         day_outside:
           "day-outside text-muted-foreground opacity-50 aria-selected:bg-accent/50 aria-selected:text-muted-foreground aria-selected:opacity-30", // Adjusted outside day opacity
@@ -86,7 +93,7 @@ function Calendar({
                value={value?.toString()}
                onValueChange={(newValue) => handleChange(newValue)}
              >
-               <SelectTrigger className="h-7 w-[45%] focus:ring-0 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent text-sm font-medium">
+               <SelectTrigger className="h-7 w-full focus:ring-0 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent text-sm font-medium"> {/* Changed w-[45%] to w-full */}
                  <SelectValue>{currentOption?.props.children}</SelectValue>
                </SelectTrigger>
                <SelectContent className="max-h-[var(--radix-select-content-available-height)] overflow-y-auto scrolling-touch">
@@ -111,5 +118,6 @@ function Calendar({
 Calendar.displayName = "Calendar"
 
 export { Calendar }
+
 
 

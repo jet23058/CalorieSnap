@@ -78,6 +78,12 @@ import { zhTW } from 'date-fns/locale';
 import { Skeleton } from "@/components/ui/skeleton";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"; // Import Accordion components
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"; // Import RadioGroup components
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip" // Import Tooltip components
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -1167,6 +1173,22 @@ export default function CalorieLogger() {
                                  {entry.notes}
                              </p>
                           )}
+                          {/* Nutritionist Comment Tooltip */}
+                          {entry.nutritionistComment && logViewMode === 'daily' && (
+                            <TooltipProvider delayDuration={100}>
+                                <Tooltip>
+                                <TooltipTrigger asChild>
+                                     <button className="mt-2 flex items-center text-xs text-blue-600 hover:text-blue-800 cursor-help">
+                                         <NotebookText size={14} className="mr-1" />
+                                         查看營養師建議
+                                     </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom" align="start" className="max-w-[300px] text-xs bg-background border shadow-md p-2 rounded-md">
+                                    <p>{entry.nutritionistComment}</p>
+                                </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                         )}
                     </div>
 
                     {/* Action Buttons */}
@@ -1198,22 +1220,6 @@ export default function CalorieLogger() {
                     </div>
                 </div>
             </CardHeader>
-             {/* Nutritionist Comment Accordion */}
-             {entry.nutritionistComment && (
-                 <Accordion type="single" collapsible className="w-full px-4 pb-2">
-                     <AccordionItem value={`comment-${entry.id}`} className="border-b-0">
-                         <AccordionTrigger className="text-xs text-muted-foreground py-1 hover:no-underline">
-                             <div className="flex items-center gap-1">
-                                 <NotebookText size={14} />
-                                 <span>營養師評論</span>
-                             </div>
-                         </AccordionTrigger>
-                         <AccordionContent className="text-xs text-muted-foreground pt-1">
-                             {entry.nutritionistComment}
-                         </AccordionContent>
-                     </AccordionItem>
-                 </Accordion>
-             )}
         </Card>
          {/* Image Zoom Modal Content */}
          {entry.imageUrl && (
@@ -1435,8 +1441,8 @@ export default function CalorieLogger() {
                  </div>
 
                  {/* Calendar/Month Selector Placeholder */}
-                 <div className="mb-4 flex justify-center">
-                     <Skeleton className="h-[300px] w-full rounded-md" /> {/* Changed width */}
+                 <div className="mb-4 flex justify-center w-full border-y"> {/* Adjusted width and border */}
+                     <Skeleton className="h-[360px] w-full rounded-none" /> {/* Adjusted height and width */}
                  </div>
                   {/* Sorting Options Placeholder (for monthly view) */}
                   <div className="mb-4 flex justify-end">
@@ -1509,7 +1515,7 @@ export default function CalorieLogger() {
                      mode="single"
                      selected={selectedDate}
                      onSelect={setSelectedDate}
-                     className="rounded-none border-0 shadow-none w-full p-0 sm:p-4" // Removed border, shadow, padding for full width
+                     className="rounded-none border-0 shadow-none w-full p-0 md:p-2" // Adjusted padding
                      classNames={{ // Ensure month uses full width
                         months: "flex flex-col sm:flex-row w-full",
                         month: "space-y-4 w-full",
@@ -1517,11 +1523,25 @@ export default function CalorieLogger() {
                         head_row: "flex justify-around", // Distribute headers evenly
                         head_cell: "text-muted-foreground rounded-md w-[14.28%] font-normal text-[0.8rem]", // Use percentages for width
                         row: "flex w-full mt-2 justify-around", // Distribute cells evenly
-                        cell: "h-9 w-[14.28%] text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20", // Use percentages
+                        cell: cn(
+                          "h-9 w-[14.28%] text-center text-sm p-0 relative", // Use percentages
+                          "[&:has([aria-selected])]:bg-accent [&:has([aria-selected])]:rounded-md", // Apply accent and rounding to the cell itself when selected
+                          "[&:has([aria-selected].day-outside)]:bg-accent/50", // Style for selected outside days
+                          "[&:has([aria-selected].day-range-end)]:rounded-r-md",
+                          "first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md"
+                          // Removed focus-within styles causing orange ring
+                        ),
                         day: cn(
                            buttonVariants({ variant: "ghost" }),
-                           "h-9 w-full p-0 font-normal aria-selected:opacity-100" // Make day button full width of cell
+                           "h-9 w-full p-0 font-normal aria-selected:opacity-100", // Make day button full width of cell
+                           "focus-visible:ring-0 focus-visible:ring-offset-0"
                         ),
+                        day_selected: // Use this specific class for selected day styling
+                          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
+                        day_today: { // Keep today styling, ensure it doesn't conflict with selected
+                           backgroundColor: 'hsl(var(--accent))',
+                           color: 'hsl(var(--accent-foreground))',
+                        },
                      }}
                      disabled={date => date > new Date() || date < new Date("1900-01-01")}
                      initialFocus
@@ -1529,16 +1549,10 @@ export default function CalorieLogger() {
                      modifiers={{
                          calorieLogged: calorieLoggedDays,
                          waterLogged: waterLoggedDays,
-                         // selected: selectedDate ? [selectedDate] : [], // Don't apply default selected style
                      }}
                      modifiersStyles={{
                          calorieLogged: { fontWeight: 'bold' },
                          waterLogged: { textDecoration: 'underline', textDecorationColor: 'hsl(var(--chart-2))', textDecorationThickness: '2px' }, // Use underline instead
-                         // selected: {}, // Removed default selection styling
-                         today: { // Keep today styling
-                           backgroundColor: 'hsl(var(--accent))',
-                           color: 'hsl(var(--accent-foreground))',
-                         },
                      }}
                      captionLayout="dropdown-buttons" // Use dropdowns for easier navigation
                      fromYear={2020} // Example start year
@@ -2416,4 +2430,5 @@ export default function CalorieLogger() {
     </Tabs> // Close the top-level Tabs component
   );
 }
+
 
