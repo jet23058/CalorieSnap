@@ -4,6 +4,16 @@ import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 // import { getAnalytics } from "firebase/analytics"; // Optional: If you use Analytics
 
+// --- List of required Firebase environment variables (excluding optional measurementId) ---
+const REQUIRED_FIREBASE_CONFIG_KEYS = [
+  'NEXT_PUBLIC_FIREBASE_API_KEY',
+  'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
+  'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
+  'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET',
+  'NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
+  'NEXT_PUBLIC_FIREBASE_APP_ID',
+];
+
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -14,47 +24,55 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, // Optional
 };
 
-// Validate that Firebase config values are present
-const missingConfigKeys = Object.entries(firebaseConfig)
-  .filter(([key, value]) => !value && key !== 'measurementId') // measurementId is optional
-  .map(([key]) => key);
+// --- Enhanced Validation ---
+const missingConfigKeys = REQUIRED_FIREBASE_CONFIG_KEYS.filter(key => {
+    const value = process.env[key];
+    // Return true (missing) if value is undefined, null, or an empty string
+    return value === undefined || value === null || value.trim() === '';
+});
 
 if (missingConfigKeys.length > 0) {
-  console.error('Firebase configuration is missing:', missingConfigKeys.join(', '));
-  console.error('Please ensure all NEXT_PUBLIC_FIREBASE_* environment variables are set in your .env file or deployment environment.');
-  // Optionally throw an error or handle this case appropriately
-  // throw new Error(`Missing Firebase configuration: ${missingConfigKeys.join(', ')}`);
+  const errorMessage = `Firebase configuration is incomplete. Missing keys: ${missingConfigKeys.join(', ')}. Please ensure all required NEXT_PUBLIC_FIREBASE_* environment variables are set in your .env file or deployment environment.`;
+  console.error('-------------------------------------------------------');
+  console.error('!!! FIREBASE CONFIGURATION ERROR !!!');
+  console.error(errorMessage);
+  console.error('See https://console.firebase.google.com/ -> Project settings');
+  console.error('-------------------------------------------------------');
+
+  // Decide how to handle missing config: Throw error or allow partial init (not recommended for production)
+  if (process.env.NODE_ENV === 'production') {
+      throw new Error(errorMessage); // Strict in production
+  } else {
+      console.warn('!!! Attempting to initialize Firebase with incomplete configuration (Development Mode) !!!');
+      // Allow potential initialization in dev mode, Firebase might throw specific errors later.
+  }
 }
 
 
-// Initialize Firebase
+// --- Initialize Firebase ---
 let app: FirebaseApp;
 if (!getApps().length) {
-  // Only initialize if config seems valid (or partially valid, letting Firebase handle specific errors)
-  if (missingConfigKeys.length === 0 || process.env.NODE_ENV !== 'production') { // Allow initialization in dev even if partially missing
-    try {
-        app = initializeApp(firebaseConfig);
-        // Initialize Analytics if needed
-        // if (typeof window !== 'undefined') {
-        //   getAnalytics(app);
-        // }
-    } catch (error) {
-         console.error("Error initializing Firebase:", error);
-         // Re-throw or handle error based on application needs
-         throw error;
-    }
-  } else {
-      // In production, prevent initialization if config is missing
-      console.error("Firebase initialization skipped due to missing configuration in production.");
-      // A fallback 'app' object or null could be assigned here if needed
-      // app = null as any; // Example: assign null or a mock object
-      throw new Error("Firebase configuration is missing in production.");
+  // Only initialize if config seems valid (or partially valid in dev mode)
+  // In production, this block won't be reached if keys are missing due to the throw above.
+  try {
+      app = initializeApp(firebaseConfig);
+      console.log("Firebase initialized successfully."); // Add success log
+      // Initialize Analytics if needed
+      // if (typeof window !== 'undefined') {
+      //   getAnalytics(app);
+      // }
+  } catch (error) {
+       console.error("!!! Error initializing Firebase App:", error);
+       // Re-throw or handle error based on application needs
+       throw error; // Re-throwing to make sure the failure is obvious
   }
 } else {
   app = getApp();
+  console.log("Firebase app already initialized."); // Add log for existing app
 }
 
-// Initialize Auth and Firestore, handling potential errors if app initialization failed
+// --- Initialize Auth and Firestore ---
+// These will only be attempted if `app` was successfully initialized or retrieved.
 let auth: Auth;
 let db: Firestore;
 
@@ -62,9 +80,12 @@ try {
     auth = getAuth(app);
     db = getFirestore(app);
 } catch (error) {
-    console.error("Error getting Firebase Auth or Firestore instance:", error);
+    console.error("!!! Error getting Firebase Auth or Firestore instance:", error);
     // Handle the error appropriately, e.g., by setting auth/db to null or throwing
-    throw error;
+    // Depending on how critical these are, you might want to throw.
+    // If the app can function partially without auth/db, you might set them to null/undefined.
+    // For this app, auth and db are likely critical, so re-throwing.
+    throw new Error(`Failed to initialize Firebase services: ${error}`);
 }
 
 
