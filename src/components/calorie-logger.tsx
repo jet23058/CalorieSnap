@@ -1427,7 +1427,7 @@ export default function CalorieLogger() {
     if (!isClient) {
         // Render placeholder or loading state on the server
         return (
-             <div className="mt-6">
+             <div className="mt-6 px-4 md:px-6"> {/* Add padding here for server rendering */}
                  <div className="flex justify-between items-center mb-4">
                      <h2 className="text-2xl font-semibold text-primary flex items-center gap-2"><CalendarDays size={24}/> 卡路里記錄摘要</h2>
                       {/* View Mode Toggle Placeholder */}
@@ -1478,9 +1478,9 @@ export default function CalorieLogger() {
 
 
     return (
-        <div className="mt-6">
-            {renderStorageError()}
-             <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-2">
+        <div className="mt-0"> {/* Removed top margin to allow calendar to be flush */}
+            {renderStorageError() && <div className="px-4 md:px-6">{renderStorageError()}</div>} {/* Add padding to error */}
+             <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-2 px-4 md:px-6"> {/* Add padding here */}
                 <h2 className="text-2xl font-semibold text-primary flex items-center gap-2 shrink-0">
                     <CalendarDays size={24}/> 卡路里記錄摘要
                 </h2>
@@ -1504,26 +1504,40 @@ export default function CalorieLogger() {
 
 
             {/* Calendar */}
-             <div className="mb-6 w-full"> {/* Changed width to full */}
+             <div className="mb-6 w-full border-y"> {/* Added border-y */}
                  <Calendar
                      mode="single"
                      selected={selectedDate}
                      onSelect={setSelectedDate}
-                     className="rounded-md border shadow-sm w-full p-4" // Make calendar full width
+                     className="rounded-none border-0 shadow-none w-full p-0 sm:p-4" // Removed border, shadow, padding for full width
+                     classNames={{ // Ensure month uses full width
+                        months: "flex flex-col sm:flex-row w-full",
+                        month: "space-y-4 w-full",
+                        table: "w-full border-collapse space-y-1",
+                        head_row: "flex justify-around", // Distribute headers evenly
+                        head_cell: "text-muted-foreground rounded-md w-[14.28%] font-normal text-[0.8rem]", // Use percentages for width
+                        row: "flex w-full mt-2 justify-around", // Distribute cells evenly
+                        cell: "h-9 w-[14.28%] text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20", // Use percentages
+                        day: cn(
+                           buttonVariants({ variant: "ghost" }),
+                           "h-9 w-full p-0 font-normal aria-selected:opacity-100" // Make day button full width of cell
+                        ),
+                     }}
                      disabled={date => date > new Date() || date < new Date("1900-01-01")}
                      initialFocus
                      locale={zhTW} // Ensure locale is passed
                      modifiers={{
                          calorieLogged: calorieLoggedDays,
                          waterLogged: waterLoggedDays,
-                         selected: selectedDate ? [selectedDate] : [], // Ensure selected date is visually marked
+                         // selected: selectedDate ? [selectedDate] : [], // Don't apply default selected style
                      }}
                      modifiersStyles={{
                          calorieLogged: { fontWeight: 'bold' },
                          waterLogged: { textDecoration: 'underline', textDecorationColor: 'hsl(var(--chart-2))', textDecorationThickness: '2px' }, // Use underline instead
-                         selected: { // Style for selected date
-                            backgroundColor: 'hsl(var(--primary))',
-                            color: 'hsl(var(--primary-foreground))',
+                         // selected: {}, // Removed default selection styling
+                         today: { // Keep today styling
+                           backgroundColor: 'hsl(var(--accent))',
+                           color: 'hsl(var(--accent-foreground))',
                          },
                      }}
                      captionLayout="dropdown-buttons" // Use dropdowns for easier navigation
@@ -1536,7 +1550,7 @@ export default function CalorieLogger() {
 
              {/* Sorting Options (Monthly View Only) */}
              {logViewMode === 'monthly' && (
-                 <div className="mb-4 flex justify-end">
+                 <div className="mb-4 flex justify-end px-4 md:px-6"> {/* Add padding here */}
                      <Select value={monthlySortCriteria} onValueChange={(value) => setMonthlySortCriteria(value as MonthlySortCriteria)}>
                          <SelectTrigger className="w-full sm:w-[180px]">
                              <ArrowDownUp size={16} className="mr-2"/>
@@ -1555,7 +1569,7 @@ export default function CalorieLogger() {
 
             {/* Log Entries */}
             {selectedDate && (
-                <div>
+                <div className="px-4 md:px-6"> {/* Add padding here */}
                     <h3 className="text-lg font-medium mb-3 border-b pb-1 text-muted-foreground">
                          {logViewMode === 'daily'
                             ? `${format(selectedDate, 'yyyy 年 MM 月 dd 日', { locale: zhTW })} 的記錄`
@@ -1582,14 +1596,14 @@ export default function CalorieLogger() {
 
             {/* Fallback if no date is selected (shouldn't happen with default) */}
             {!selectedDate && calorieLog.length > 0 && (
-                 <div className="text-center text-muted-foreground py-6">
+                 <div className="text-center text-muted-foreground py-6 px-4 md:px-6"> {/* Add padding */}
                      <p>請選擇一個日期或月份以查看記錄。</p>
                  </div>
             )}
 
              {/* Show initial message if no logs exist at all */}
              {calorieLog.length === 0 && (
-                 <div className="text-center text-muted-foreground py-10 mt-6">
+                 <div className="text-center text-muted-foreground py-10 mt-6 px-4 md:px-6"> {/* Add padding */}
                      <UtensilsCrossed className="mx-auto h-12 w-12 opacity-50 mb-4" />
                      <p>尚未記錄任何卡路里。</p>
                      <p>使用下方的「＋」按鈕開始記錄！</p> {/* Updated instruction */}
@@ -2285,14 +2299,16 @@ export default function CalorieLogger() {
     // Changed to flex layout for app structure
     // Wrap everything inside the Tabs component
     <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full bg-background">
-      {/* Main Content Area */}
-      <div className="flex-grow overflow-y-auto p-4 md:p-6 pb-[88px]"> {/* Added padding-bottom */}
+      {/* Main Content Area - Remove padding here */}
+      <div className="flex-grow overflow-y-auto pb-[88px]"> {/* Added padding-bottom, removed horizontal padding */}
             {/* Tab Contents */}
              {/* Tab 1: Logging & Summary */}
             <TabsContent value="logging" className="mt-0 h-full">
 
                  {/* Estimation Result (only show if imageSrc exists and not cropping, and on client) */}
-                 {isClient && imageSrc && !isCropping && renderEstimationResult()}
+                 {isClient && imageSrc && !isCropping && (
+                     <div className="px-4 md:px-6">{renderEstimationResult()}</div> /* Add padding here */
+                 )}
 
                  {/* Calorie Log Summary */}
                 {renderLogList()}
@@ -2300,18 +2316,18 @@ export default function CalorieLogger() {
             </TabsContent>
 
              {/* Tab 2: Water Tracking */}
-            <TabsContent value="tracking" className="mt-0 h-full">
+            <TabsContent value="tracking" className="mt-0 h-full px-4 md:px-6"> {/* Add padding here */}
                 {renderWaterTracker()}
                 {renderProfileStats()} {/* Moved profile stats here */}
             </TabsContent>
 
             {/* Tab 3: Achievements */}
-            <TabsContent value="achievements" className="mt-0 h-full"> {/* Changed value to "achievements" */}
+            <TabsContent value="achievements" className="mt-0 h-full px-4 md:px-6"> {/* Add padding here */}
                  {renderAchievementSummary()}
             </TabsContent>
 
              {/* Tab 4: Settings */}
-             <TabsContent value="settings" className="mt-0 h-full">
+             <TabsContent value="settings" className="mt-0 h-full px-4 md:px-6"> {/* Add padding here */}
                  {renderProfileEditor()}
                  {renderNotificationSettingsTrigger()}
              </TabsContent>
@@ -2400,3 +2416,4 @@ export default function CalorieLogger() {
     </Tabs> // Close the top-level Tabs component
   );
 }
+
