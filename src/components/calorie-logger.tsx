@@ -59,7 +59,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose, DialogDescription } from "@/components/ui/dialog";
-import ReactCrop, { type Crop, centerCrop, makeAspectCrop } from 'react-image-crop';
+import ReactCrop, { type Crop, centerCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { Sheet, SheetTrigger } from '@/components/ui/sheet'; // Import Sheet components
 import { NotificationSettingsSheet, NotificationSettings, defaultSettings as defaultNotificationSettings } from '@/components/notification-settings-sheet'; // Import the settings types
@@ -306,6 +306,7 @@ export default function CalorieLogger() {
   const [logViewMode, setLogViewMode] = useState<LogViewMode>('daily'); // State for log view mode
   const [monthlySortCriteria, setMonthlySortCriteria] = useState<MonthlySortCriteria>('time-desc'); // State for monthly sorting
   const [activeTab, setActiveTab] = useState('logging'); // State for currently active tab
+  const [showEstimationDialog, setShowEstimationDialog] = useState(false); // State for estimation result dialog
 
   const { toast } = useToast();
 
@@ -570,7 +571,7 @@ export default function CalorieLogger() {
   }
 
 
-  const getCroppedImg = (image: HTMLImageElement, cropData: Crop, quality: number = 0.2): Promise<string | null> => { // Adjusted default quality to 0.2 (20%)
+  const getCroppedImg = (image: HTMLImageElement, cropData: Crop, quality: number = 0.8): Promise<string | null> => { // Adjusted default quality to 0.8 (80%)
     const canvas = document.createElement('canvas');
     const scaleX = image.naturalWidth / image.width;
     const scaleY = image.naturalHeight / image.height;
@@ -642,13 +643,13 @@ const handleCropConfirm = async () => {
         return;
     }
 
-    setIsLoading(true);
+    setIsLoading(true); // For the AI estimation that follows
     setError(null);
-    setEstimation(null);
+    setEstimation(null); // Clear previous estimation
 
     try {
         let imageToSendForEstimation: string | null = null;
-        let imageToDisplayInCard: string | null = imageSrc; // Default to original for display
+        let imageToDisplayInDialog: string | null = imageSrc; // Default to original for display
 
         // Check if an actual crop was made (not just full image selection)
         const isFullImageCrop =
@@ -661,19 +662,20 @@ const handleCropConfirm = async () => {
 
         if (isFullImageCrop) {
             // If full image is "cropped", send a compressed version for estimation
-            // but keep the original for display
-            imageToSendForEstimation = await getCroppedImg(imgRef.current, centerAspectCrop(imgRef.current.naturalWidth, imgRef.current.naturalHeight), 0.2); // 20% quality for AI
-            imageToDisplayInCard = imageSrc; // Display original high quality
+            // but keep the original-like quality for display
+            imageToSendForEstimation = await getCroppedImg(imgRef.current, centerAspectCrop(imgRef.current.naturalWidth, imgRef.current.naturalHeight), 0.8); // 80% quality for AI
+            imageToDisplayInDialog = imageSrc; // Display original high quality
         } else if (completedCrop?.width && completedCrop?.height) {
             // If an actual partial crop was made
             // Generate a version for AI (lower quality)
-            imageToSendForEstimation = await getCroppedImg(imgRef.current, completedCrop, 0.2); // 20% quality for AI
-            // Generate a version for display card (higher quality)
-            imageToDisplayInCard = await getCroppedImg(imgRef.current, completedCrop, 0.9); // 90% quality for display
+            imageToSendForEstimation = await getCroppedImg(imgRef.current, completedCrop, 0.8); // 80% quality for AI
+            // Generate a version for display dialog (higher quality, reflecting the crop)
+            imageToDisplayInDialog = await getCroppedImg(imgRef.current, completedCrop, 0.9); // 90% quality for display
         }
 
         if (imageToSendForEstimation) {
-            setImageForEstimationCard(imageToDisplayInCard || imageSrc); // Update card display
+            setImageForEstimationCard(imageToDisplayInDialog || imageSrc); // Update image for estimation dialog
+            setShowEstimationDialog(true); // Show the estimation dialog
             await handleImageEstimation(imageToSendForEstimation); // Send (potentially compressed/cropped) for estimation
         } else {
             setError('無法裁切影像。');
@@ -686,15 +688,15 @@ const handleCropConfirm = async () => {
         toast({ variant: 'destructive', title: '錯誤', description: '裁切影像時發生錯誤。' });
         setImageForEstimationCard(imageSrc); // Fallback to original on error
     } finally {
-        setIsLoading(false);
-        setIsCropping(false);
+        // setIsLoading(false); // isLoading is for the AI estimation, not for closing crop dialog
+        setIsCropping(false); // Close crop dialog regardless of AI outcome
     }
 };
 
 const handleCropCancel = () => {
     setIsCropping(false);
     setImageSrc(null); // Clear the original image if cropping is cancelled
-    setImageForEstimationCard(null); // Clear the image for the estimation card
+    setImageForEstimationCard(null); // Clear the image for the estimation card/dialog
     setEstimation(null);
     setError(null);
     if (fileInputRef.current) {
@@ -730,6 +732,7 @@ const handleCropCancel = () => {
         setImageSrc(dataUrl); // This is the original image for the crop dialog
         setImageForEstimationCard(null); // Clear previous estimation card image
         setIsCropping(true);
+        setShowEstimationDialog(false); // Ensure estimation dialog is hidden
         setEstimation(null); // Clear previous estimation
         setError(null);
         // Reset crop state for the new image
@@ -758,6 +761,7 @@ const handleCropCancel = () => {
         setImageSrc(dataUrl); // Original image for crop dialog
         setImageForEstimationCard(null); // Clear previous estimation card image
         setIsCropping(true);
+        setShowEstimationDialog(false); // Ensure estimation dialog is hidden
         setEstimation(null); // Clear previous estimation
         setError(null);
          // Reset crop state for the new image
@@ -811,6 +815,7 @@ const handleCropCancel = () => {
           setError(errorMsg);
           setEstimation(null); // Clear estimation on error
           toast({ variant: 'destructive', title: '估算錯誤', description: errorMsg });
+          setShowEstimationDialog(false); // Hide dialog on error
       } finally {
           setIsLoading(false);
       }
@@ -934,6 +939,7 @@ const handleCropCancel = () => {
         setImageForEstimationCard(null); // Clear image in estimation card
         setEstimation(null);
         setError(null);
+        setShowEstimationDialog(false); // Close estimation dialog
         if (fileInputRef.current) {
           fileInputRef.current.value = ""; // Reset file input
         }
@@ -1485,82 +1491,97 @@ const handleCropCancel = () => {
  );
 
 
- const renderEstimationResult = () => (
-    <Card className="mt-6 shadow-md">
-        <CardHeader>
-            <CardTitle>估算結果</CardTitle>
-            <CardDescription>AI 對您照片的分析。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-            {estimation?.isFoodItem === false && (
-                 <Alert variant="orange" className="mb-4">
-                     <Info className="h-4 w-4" />
-                     <AlertTitle>注意：可能不是食物</AlertTitle>
-                     <AlertDescription>
-                         AI 認為這張圖片中的「{estimation.foodItem}」可能不是食物。記錄的卡路里將為 0，但您可以稍後編輯。
-                     </AlertDescription>
-                 </Alert>
-            )}
-            {/* Editable Food Item Name */}
-            <div className="flex items-center justify-between">
-               <Label htmlFor="est-foodItem" className="font-medium text-foreground flex items-center shrink-0 pr-2">
-                   <Edit size={12} className="mr-1 opacity-70"/> 食物名稱：
-               </Label>
-               <Input
-                   id="est-foodItem"
-                   type="text"
-                   value={estimation?.foodItem ?? ''}
-                   onChange={(e) => setEstimation(prev => prev ? { ...prev, foodItem: e.target.value } : null)}
-                   className="font-semibold text-primary h-8 flex-grow text-right"
-                   aria-label="編輯食物名稱"
-                   disabled={estimation === null} // Disable if no estimation yet
-               />
-            </div>
-            {/* Editable Calorie Estimate */}
-            <div className="flex items-center justify-between">
-                 <Label htmlFor="est-calories" className="font-medium text-foreground flex items-center shrink-0 pr-2">
-                     <Edit size={12} className="mr-1 opacity-70"/> 估計卡路里：
-                 </Label>
-                  <Input
-                     id="est-calories"
-                     type="number"
-                     value={estimation?.calorieEstimate ?? ''}
-                     onChange={(e) => handleEstimationCalorieChange(e.target.value)}
-                     className="font-semibold text-primary h-8 w-24 text-right ml-auto" // Added ml-auto
-                     aria-label="編輯估計卡路里"
-                     disabled={estimation === null} // Disable if no estimation yet
-                     min="0"
-                 />
-            </div>
-             {estimation?.isFoodItem && estimation?.confidence !== undefined && (
-                 <div className="flex items-center justify-between">
-                     <span className="font-medium text-foreground">信賴度：</span>
-                     <span className={`text-sm ${estimation.confidence > 0.7 ? 'text-green-600' : 'text-orange-600'}`}>
-                         {Math.round(estimation.confidence * 100)}%
-                     </span>
-                 </div>
-             )}
+ const renderEstimationDialog = () => (
+    <Dialog open={showEstimationDialog} onOpenChange={(open) => {
+        if (!open) { // If dialog is closing (e.g. clicking outside or Esc)
+            setImageSrc(null);
+            setImageForEstimationCard(null);
+            setEstimation(null);
+            setError(null);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = "";
+            }
+        }
+        setShowEstimationDialog(open);
+    }}>
+        <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+                <DialogTitle>估算結果</DialogTitle>
+                <DialogDescription>AI 對您照片的分析。您可以在此編輯後記錄。</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+                {estimation?.isFoodItem === false && (
+                    <Alert variant="orange" className="mb-4">
+                        <Info className="h-4 w-4" />
+                        <AlertTitle>注意：可能不是食物</AlertTitle>
+                        <AlertDescription>
+                            AI 認為這張圖片中的「{estimation.foodItem}」可能不是食物。記錄的卡路里將為 0，但您可以稍後編輯。
+                        </AlertDescription>
+                    </Alert>
+                )}
+                {/* Editable Food Item Name */}
+                <div className="flex items-center justify-between">
+                    <Label htmlFor="est-foodItem-dialog" className="font-medium text-foreground flex items-center shrink-0 pr-2">
+                        <Edit size={12} className="mr-1 opacity-70" /> 食物名稱：
+                    </Label>
+                    <Input
+                        id="est-foodItem-dialog"
+                        type="text"
+                        value={estimation?.foodItem ?? ''}
+                        onChange={(e) => setEstimation(prev => prev ? { ...prev, foodItem: e.target.value } : null)}
+                        className="font-semibold text-primary h-8 flex-grow text-right bg-muted"
+                        aria-label="編輯食物名稱"
+                        disabled={estimation === null || isLoading}
+                    />
+                </div>
+                {/* Editable Calorie Estimate */}
+                <div className="flex items-center justify-between">
+                    <Label htmlFor="est-calories-dialog" className="font-medium text-foreground flex items-center shrink-0 pr-2">
+                        <Edit size={12} className="mr-1 opacity-70" /> 估計卡路里：
+                    </Label>
+                    <Input
+                        id="est-calories-dialog"
+                        type="number"
+                        value={estimation?.calorieEstimate ?? ''}
+                        onChange={(e) => handleEstimationCalorieChange(e.target.value)}
+                        className="font-semibold text-primary h-8 w-24 text-right ml-auto bg-muted"
+                        aria-label="編輯估計卡路里"
+                        disabled={estimation === null || isLoading}
+                        min="0"
+                    />
+                </div>
+                {estimation?.isFoodItem && estimation?.confidence !== undefined && (
+                    <div className="flex items-center justify-between">
+                        <span className="font-medium text-foreground">信賴度：</span>
+                        <span className={`text-sm ${estimation.confidence > 0.7 ? 'text-green-600' : 'text-orange-600'}`}>
+                            {Math.round(estimation.confidence * 100)}%
+                        </span>
+                    </div>
+                )}
 
-             <div className="flex items-center justify-center mt-4 relative w-full aspect-video rounded-md overflow-hidden border bg-muted">
-                  {imageForEstimationCard ? ( // Use imageForEstimationCard here
-                     <img src={imageForEstimationCard} alt="拍攝的食物" className="object-contain max-h-full max-w-full" />
-                   ) : (
-                     <UtensilsCrossed className="w-12 h-12 text-muted-foreground opacity-50" />
-                   )}
-             </div>
-
-        </CardContent>
-        <CardFooter className="flex justify-end gap-2">
-             <Button variant="outline" onClick={() => { setImageSrc(null); setImageForEstimationCard(null); setEstimation(null); setError(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
-                 清除
-             </Button>
-             <Button onClick={logCalories} variant="default" disabled={!imageForEstimationCard || !user || isLoading}> {/* Disable if no image, not logged in, or loading */}
-                 {isLoading ? <LoadingSpinner className="mr-2" size={16} /> : <Plus className="mr-2 h-4 w-4" /> }
-                 {isLoading ? '記錄中...' : '記錄卡路里'}
-             </Button>
-        </CardFooter>
-    </Card>
+                <div className="flex items-center justify-center mt-4 relative w-full aspect-video rounded-md overflow-hidden border bg-muted">
+                    {imageForEstimationCard ? (
+                        <img src={imageForEstimationCard} alt="拍攝的食物" className="object-contain max-h-full max-w-full" />
+                    ) : (
+                        <UtensilsCrossed className="w-12 h-12 text-muted-foreground opacity-50" />
+                    )}
+                </div>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+                <DialogClose asChild>
+                    <Button variant="outline" disabled={isLoading}>
+                        取消
+                    </Button>
+                </DialogClose>
+                <Button onClick={logCalories} variant="default" disabled={!imageForEstimationCard || !user || isLoading}>
+                    {isLoading ? <LoadingSpinner className="mr-2" size={16} /> : <Plus className="mr-2 h-4 w-4" />}
+                    {isLoading ? '記錄中...' : '記錄卡路里'}
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
 );
+
 
 
  // Filter logs based on view mode and selected date/month
@@ -2403,7 +2424,7 @@ const handleCropCancel = () => {
 };
 
 
-  const renderEditDialog = () => (
+ const renderEditDialog = () => (
      <Dialog open={isEditing} onOpenChange={setIsEditing}>
          <DialogContent className="max-h-[90vh] overflow-y-auto">
              <DialogHeader>
@@ -2693,6 +2714,7 @@ const handleCropCancel = () => {
                          onChange={(e) => handleProfileChange('age', e.target.value)}
                          min="1" // Minimum age 1
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
+                         className="bg-input" // Ensure white background for edit
                      />
                  </div>
                  {/* Gender */}
@@ -2703,7 +2725,7 @@ const handleCropCancel = () => {
                          onValueChange={(value) => handleProfileChange('gender', value)}
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
                       >
-                         <SelectTrigger id="gender" aria-label="選取生理性別">
+                         <SelectTrigger id="gender" aria-label="選取生理性別" className="bg-input"> {/* Ensure white background for edit */}
                              <SelectValue placeholder="選取生理性別" />
                          </SelectTrigger>
                          <SelectContent>
@@ -2725,6 +2747,7 @@ const handleCropCancel = () => {
                          onChange={(e) => handleProfileChange('height', e.target.value)}
                           min="1" // Minimum height 1cm
                           disabled={!isClient || isLoading} // Disable on server or during DB operation
+                          className="bg-input" // Ensure white background for edit
                      />
                  </div>
                   {/* Weight */}
@@ -2739,6 +2762,7 @@ const handleCropCancel = () => {
                          min="1" // Minimum weight 1kg
                          step="0.1" // Allow decimal for weight
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
+                         className="bg-input" // Ensure white background for edit
                      />
                  </div>
                  {/* Activity Level */}
@@ -2749,7 +2773,7 @@ const handleCropCancel = () => {
                          onValueChange={(value) => handleProfileChange('activityLevel', value)}
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
                      >
-                         <SelectTrigger id="activityLevel" aria-label="選取活動水平">
+                         <SelectTrigger id="activityLevel" aria-label="選取活動水平" className="bg-input"> {/* Ensure white background for edit */}
                              <SelectValue placeholder="選取您的活動水平" />
                          </SelectTrigger>
                          <SelectContent>
@@ -2768,7 +2792,7 @@ const handleCropCancel = () => {
                          onValueChange={(value) => handleProfileChange('healthGoal', value)}
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
                      >
-                         <SelectTrigger id="healthGoal" aria-label="選取健康目標">
+                         <SelectTrigger id="healthGoal" aria-label="選取健康目標" className="bg-input"> {/* Ensure white background for edit */}
                              <SelectValue placeholder="選取您的健康目標" />
                          </SelectTrigger>
                          <SelectContent>
@@ -2820,8 +2844,8 @@ const handleCropCancel = () => {
     // Changed to flex layout for app structure
     // Wrap everything inside the Tabs component
     <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full bg-background">
-      {/* Main Content Area - Remove padding here */}
-      <div className="flex-grow overflow-y-auto pb-[88px]"> {/* Added padding-bottom, removed horizontal padding */}
+      {/* Main Content Area */}
+      <div className="flex-grow pb-[88px]"> {/* Removed overflow-y-auto, Added padding-bottom */}
             {/* Display Global Errors (Auth/DB Connection) */}
             {(authError || dbError) && (
                  <div className="px-4 md:px-6 sticky top-0 z-10 py-2 bg-background/90 backdrop-blur">
@@ -2831,16 +2855,7 @@ const handleCropCancel = () => {
             {/* Tab Contents */}
              {/* Tab 1: Logging & Summary */}
             <TabsContent value="logging" className="mt-0 h-full">
-
-                 {/* Estimation Result (only show if imageForEstimationCard exists and not cropping, and on client) */}
-                 {isClient && imageForEstimationCard && !isCropping && ( // Use imageForEstimationCard
-                      <div className="px-4 md:px-6">{renderEstimationResult()}</div> /* Add padding here */
-                 )}
-
-                 {/* Show log list or login prompt */}
                  {renderLogList()}
-
-
             </TabsContent>
 
              {/* Tab 2: Water Tracking & Profile Stats */}
@@ -2972,6 +2987,7 @@ const handleCropCancel = () => {
       {renderImageZoomModal(showImageModal, () => setShowImageModal(null))}
       {renderEditDialog()}
       {renderCropDialog()}
+      {renderEstimationDialog()} {/* Render estimation dialog */}
       <canvas ref={canvasRef} className="hidden" /> {/* Keep canvas for image capture */}
     </Tabs> // Close the top-level Tabs component
   );
