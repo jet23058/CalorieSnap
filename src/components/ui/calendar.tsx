@@ -96,8 +96,10 @@ function Calendar({
                <SelectTrigger
                  className={cn(
                     "h-8 text-sm font-medium flex-1 rounded-md px-2 py-1",
-                    "border border-input bg-input hover:bg-accent/10", // More prominent styling
-                    "focus:ring-ring focus:ring-2 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-0" // Standard focus
+                    "border border-input bg-input hover:bg-accent/10", 
+                    "focus:ring-ring focus:ring-2 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-0",
+                    dropdownProps.name === 'months' && "ml-[50px]",
+                    dropdownProps.name === 'years' && "mr-[50px]"
                  )}
                 >
                  <SelectValue>{currentOption?.props.children}</SelectValue>
@@ -124,6 +126,7 @@ function Calendar({
 Calendar.displayName = "Calendar"
 
 export { Calendar }
+
 
 
 
