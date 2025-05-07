@@ -669,7 +669,7 @@ const handleCropConfirm = async () => {
             // Generate a version for AI (lower quality)
             imageToSendForEstimation = await getCroppedImg(imgRef.current, completedCrop, 0.2); // 20% quality for AI
             // Generate a version for display card (higher quality)
-            imageToDisplayInCard = await getCroppedImg(imgRef.current, completedCrop, 0.85); // 85% quality for display
+            imageToDisplayInCard = await getCroppedImg(imgRef.current, completedCrop, 0.9); // 90% quality for display
         }
 
         if (imageToSendForEstimation) {
@@ -1862,7 +1862,7 @@ const handleCropCancel = () => {
                              <SelectItem value="time-desc">時間 (最新優先)</SelectItem>
                              <SelectItem value="time-asc">時間 (最舊優先)</SelectItem>
                              <SelectItem value="calories-desc">卡路里 (高到低)</SelectItem>
-                             <SelectItem value="calories-asc">卡路里 (低到高)</SelectItem>
+                             <SelectItem value="calories-asc">卡路里 (低到低)</SelectItem>
                          </SelectContent>
                      </Select>
                  </div>
@@ -2978,3 +2978,5 @@ const handleCropCancel = () => {
 }
 
   
+
+    
