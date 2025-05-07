@@ -137,6 +137,5 @@
 -   `npm run typecheck`: 執行 TypeScript 型別檢查。
 
 ---
-
-感謝您的使用！
-```
+> [!NOTE]
+> use firebase studio
