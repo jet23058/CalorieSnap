@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import React, {
@@ -36,6 +37,7 @@ import {
   ArrowDownUp, // Icon for sorting
   Target, // Icon for Health Goal
   ListChecks, // Icon for 7-day summary
+  LineChart as LineChartIcon, // Icon for chart
 } from 'lucide-react';
 import {
   Tabs,
@@ -89,6 +91,8 @@ import { LoginButton } from '@/components/login-button'; // Import LoginButton
 import { UserProfileDisplay } from '@/components/user-profile-display'; // Import UserProfileDisplay
 import { collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, doc, orderBy, limit, onSnapshot, Timestamp, writeBatch, setDoc } from 'firebase/firestore'; // Firestore imports
 import { db } from '@/lib/firebase/config'; // Import db instance
+import { LineChart, Line, CartesianGrid, XAxis, YAxis, LabelList, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
+import { ChartContainer, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 
 
 type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
@@ -1283,7 +1287,7 @@ export default function CalorieLogger() {
    const yesterdayWaterGoalMet = yesterdayWaterIntake >= currentRecommendedWater;
 
     // Calculate water intake for the last 7 days
-    const last7DaysWaterIntake = useMemo(() => {
+    const last7DaysWaterData = useMemo(() => {
         if (!isClient) return [];
         const today = startOfDay(new Date());
         return Array.from({ length: 7 }).map((_, i) => {
@@ -1295,12 +1299,25 @@ export default function CalorieLogger() {
             const progress = target > 0 ? Math.min((totalIntake / target) * 100, 100) : 0;
             return {
                 date,
-                totalIntake,
+                dateFormatted: format(date, 'MM/dd', { locale: zhTW }), // Format for X-axis
+                intake: totalIntake,
                 target,
                 progress,
             };
         }).reverse(); // Show oldest day first
     }, [waterLog, isClient, calculatedRecommendedWater, defaultWaterTarget]);
+
+    const chartConfig: ChartConfig = {
+        intake: {
+          label: '飲水量 (毫升)',
+          color: 'hsl(var(--chart-1))',
+        },
+        target: {
+          label: '目標飲水量 (毫升)',
+          color: 'hsl(var(--muted-foreground))',
+        }
+      } satisfies ChartConfig;
+
 
 
   // --- Rendering ---
@@ -1363,12 +1380,21 @@ export default function CalorieLogger() {
                                 </span>
                              )}
                          </div>
-                          {/* Optional Notes Display */}
-                          {entry.notes && (
-                             <p className="text-xs text-muted-foreground mt-1 italic border-l-2 border-border pl-2 line-clamp-3"> {/* Optional line-clamp for notes */}
-                                 {entry.notes}
-                             </p>
-                          )}
+                          {/* Optional Notes Display with Tooltip */}
+                           {entry.notes && (
+                            <TooltipProvider delayDuration={100}>
+                                <Tooltip>
+                                <TooltipTrigger asChild>
+                                     <p className="text-xs text-muted-foreground mt-1 italic border-l-2 border-border pl-2 line-clamp-1 cursor-help hover:line-clamp-none"> {/* line-clamp-1 initially */}
+                                         備註：{entry.notes}
+                                     </p>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom" align="start" className="max-w-[300px] text-xs bg-background border shadow-md p-2 rounded-md">
+                                    <p className="whitespace-pre-wrap">{entry.notes}</p>
+                                </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                           )}
                           {/* Nutritionist Comment Tooltip */}
                           {entry.nutritionistComment && logViewMode === 'daily' && (
                             <TooltipProvider delayDuration={100}>
@@ -1753,18 +1779,17 @@ export default function CalorieLogger() {
                      classNames={{ // Ensure month uses full width
                         months: "flex flex-col sm:flex-row w-full",
                         month: "space-y-4 w-full",
-                        caption_dropdowns: "flex justify-center gap-2 items-center w-full px-10", // Ensure dropdowns take full width
+                        caption_dropdowns: "flex justify-center gap-2 items-center w-full px-2", // Ensure dropdowns take full width
                         table: "w-full border-collapse space-y-1",
                         head_row: "flex justify-around", // Distribute headers evenly
                         head_cell: "text-muted-foreground rounded-md w-[14.28%] font-normal text-[0.8rem]", // Use percentages for width
                         row: "flex w-full mt-2 justify-around", // Distribute cells evenly
                         cell: cn(
                           "h-9 w-[14.28%] text-center text-sm p-0 relative", // Use percentages
-                          "[&:has([aria-selected])]:bg-accent [&:has([aria-selected])]:rounded-md", // Apply accent and rounding to the cell itself when selected
+                          "[&:has([aria-selected])]:rounded-md", // Remove accent background from cell for selected
                           "[&:has([aria-selected].day-outside)]:bg-accent/50", // Style for selected outside days
                           "[&:has([aria-selected].day-range-end)]:rounded-r-md",
                           "first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md"
-                          // Removed focus-within styles causing orange ring
                         ),
                         day: cn(
                            buttonVariants({ variant: "ghost" }),
@@ -1883,40 +1908,95 @@ export default function CalorieLogger() {
     </div>
  );
 
-    const render7DayWaterSummary = () => {
+    const render7DayWaterSummaryChart = () => {
         if (authLoading || (user && dbLoading)) {
             return <Skeleton className="h-72 w-full mt-6" />;
         }
         if (!user) return null; // Don't show if not logged in
         if (dbError) return <Alert variant="destructive" className="mt-4"><AlertTitle>錯誤</AlertTitle><AlertDescription>無法載入飲水摘要：{dbError}</AlertDescription></Alert>;
 
-
         return (
             <Card className="mt-6 shadow-md">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                        <ListChecks size={24} className="text-blue-500" /> 近 7 日飲水摘要
+                        <LineChartIcon size={24} className="text-blue-500" /> 近 7 日飲水分析
                     </CardTitle>
-                    <CardDescription>查看您過去一週的飲水習慣。</CardDescription>
+                    <CardDescription>您過去一週的飲水習慣圖表。</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                    {last7DaysWaterIntake.map((dayData) => (
-                        <div key={dayData.date.toISOString()} className="space-y-1">
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="font-medium text-foreground">
-                                    {format(dayData.date, 'MM/dd (EEE)', { locale: zhTW })}
-                                </span>
-                                <span className="text-muted-foreground">
-                                    {dayData.totalIntake} / {dayData.target} 毫升
-                                </span>
-                            </div>
-                            <Progress value={dayData.progress} aria-label={`${format(dayData.date, 'MM/dd')} 飲水進度 ${Math.round(dayData.progress)}%`} className="h-2" />
-                        </div>
-                    ))}
+                <CardContent>
+                    {last7DaysWaterData.length > 0 ? (
+                        <ChartContainer config={chartConfig} className="h-[250px] w-full">
+                             <ResponsiveContainer width="100%" height="100%">
+                                <LineChart
+                                    data={last7DaysWaterData}
+                                    margin={{
+                                        top: 20, right: 20, left: -10, bottom: 20, // Adjusted margins
+                                    }}
+                                >
+                                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                                    <XAxis
+                                        dataKey="dateFormatted"
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickMargin={8}
+                                        tickFormatter={(value) => value} // Already formatted
+                                    />
+                                    <YAxis
+                                        tickFormatter={(value) => `${value}ml`}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickMargin={8}
+                                        domain={[0, 'dataMax + 500']} // Add some padding to Y axis
+                                    />
+                                     <RechartsTooltip
+                                        cursor={false}
+                                        content={<ChartTooltipContent indicator="dot" />}
+                                      />
+                                    <Line
+                                        dataKey="intake"
+                                        type="monotone"
+                                        stroke="hsl(var(--chart-1))"
+                                        strokeWidth={2}
+                                        dot={{
+                                            fill: "hsl(var(--chart-1))",
+                                            r: 4,
+                                        }}
+                                        activeDot={{
+                                          r: 6,
+                                          style: { fill: "hsl(var(--primary))", opacity: 0.75 },
+                                        }}
+                                    >
+                                       <LabelList
+                                          dataKey="intake"
+                                          position="top"
+                                          offset={8}
+                                          className="fill-foreground text-xs"
+                                          formatter={(value: number) => `${value}ml`}
+                                        />
+                                    </Line>
+                                    <Line
+                                      dataKey="target"
+                                      type="monotone"
+                                      stroke="hsl(var(--muted-foreground))"
+                                      strokeWidth={2}
+                                      strokeDasharray="3 3"
+                                      dot={false}
+                                    />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </ChartContainer>
+                    ) : (
+                        <p className="text-muted-foreground text-center py-4">尚無足夠資料可顯示圖表。</p>
+                    )}
                 </CardContent>
-                <CardFooter className="text-xs text-muted-foreground">
-                    保持每日足夠飲水，有助於維持健康！
-                </CardFooter>
+                 <CardFooter className="text-xs text-muted-foreground justify-center">
+                     <span className="flex items-center mr-4">
+                         <span className="w-3 h-3 rounded-full bg-[hsl(var(--chart-1))] mr-1"></span>飲水量
+                     </span>
+                     <span className="flex items-center">
+                         <span className="w-3 h-0.5 border-t-2 border-dashed border-[hsl(var(--muted-foreground))] mr-1 inline-block align-middle"></span>目標飲水量
+                     </span>
+                 </CardFooter>
             </Card>
         );
     };
@@ -2085,7 +2165,7 @@ export default function CalorieLogger() {
                  <Trophy className="mx-auto h-12 w-12 opacity-50 mb-4" />
                  <p className="font-semibold mb-2">請先登入</p>
                  <p className="text-sm">登入後即可查看您的成就。請前往「設定」分頁登入。</p>
-                 {authError && <Alert variant="destructive" className="mt-4 text-left"><AlertTitle>錯誤</AlertTitle><AlertDescription>{authError}</AlertDescription></Alert>}
+                 {authError && <Alert variant="destructive" className="mt-4 text-left"><AlertTitle>登入錯誤</AlertTitle><AlertDescription>{authError}</AlertDescription></Alert>}
             </div>
         )
     }
@@ -2317,7 +2397,7 @@ export default function CalorieLogger() {
                              id="edit-foodItem"
                              value={editingEntry.foodItem}
                              onChange={(e) => handleEditChange('foodItem', e.target.value)}
-                             className="col-span-3"
+                             className="col-span-3 bg-input"
                          />
                      </div>
                      {/* Calories */}
@@ -2330,7 +2410,7 @@ export default function CalorieLogger() {
                              type="number"
                              value={editingEntry.calorieEstimate}
                              onChange={(e) => handleEditChange('calorieEstimate', e.target.value)}
-                             className="col-span-3"
+                             className="col-span-3 bg-input"
                              min="0" // Ensure calories are not negative
                          />
                      </div>
@@ -2344,7 +2424,7 @@ export default function CalorieLogger() {
                              type="datetime-local" // Use datetime-local for date and time
                               value={formatTimestampToLocalDateTimeString(editingEntry.timestamp)} // Format Timestamp to local for input
                              onChange={(e) => handleEditChange('timestamp', e.target.value)} // Input value is local time string
-                             className="col-span-3"
+                             className="col-span-3 bg-input"
                               max={formatTimestampToLocalDateTimeString(Timestamp.now())} // Prevent selecting future dates/times
                          />
                      </div>
@@ -2357,7 +2437,7 @@ export default function CalorieLogger() {
                              value={editingEntry.mealType || 'none'} // Use 'none' for null value
                              onValueChange={(value) => handleEditChange('mealType', value)}
                          >
-                             <SelectTrigger id="edit-mealType" className="col-span-3">
+                             <SelectTrigger id="edit-mealType" className="col-span-3 bg-input">
                                  <SelectValue placeholder="選擇餐別 (選填)" />
                              </SelectTrigger>
                              <SelectContent>
@@ -2378,7 +2458,7 @@ export default function CalorieLogger() {
                              id="edit-location"
                              value={editingEntry.location || ''}
                              onChange={(e) => handleEditChange('location', e.target.value)}
-                             className="col-span-3"
+                             className="col-span-3 bg-input"
                              placeholder="例如：家裡、餐廳名稱 (選填)"
                          />
                      </div>
@@ -2394,7 +2474,7 @@ export default function CalorieLogger() {
                              min="0" // Cost cannot be negative
                              value={editingEntry.cost === null ? '' : String(editingEntry.cost)} // Ensure value is string for input
                              onChange={(e) => handleEditChange('cost', e.target.value)}
-                             className="col-span-3"
+                             className="col-span-3 bg-input"
                              placeholder="輸入金額 (選填)"
                          />
                      </div>
@@ -2407,7 +2487,7 @@ export default function CalorieLogger() {
                              id="edit-notes"
                              value={editingEntry.notes || ''}
                              onChange={(e) => handleEditChange('notes', e.target.value)}
-                             className="col-span-3"
+                             className="col-span-3 bg-input"
                              placeholder="新增備註 (選填)"
                              rows={3}
                          />
@@ -2733,8 +2813,8 @@ export default function CalorieLogger() {
 
              {/* Tab 2: Water Tracking & Profile Stats */}
             <TabsContent value="tracking" className="mt-0 h-full px-4 md:px-6"> {/* Add padding here */}
+                {render7DayWaterSummaryChart()} {/* Moved chart above daily tracker */}
                 {renderWaterTracker()}
-                {render7DayWaterSummary()}
                 {renderProfileStats()} {/* Moved profile stats here */}
             </TabsContent>
 

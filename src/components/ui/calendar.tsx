@@ -31,7 +31,7 @@ function Calendar({
         month: "space-y-4 w-full", // Added w-full
         caption: "flex justify-center pt-1 relative items-center",
         caption_label: "text-sm font-medium hidden", // Hide default label when using dropdowns
-        caption_dropdowns: "flex justify-center gap-2 items-center w-full px-10", // Added w-full and padding
+        caption_dropdowns: "flex justify-center gap-2 items-center w-full px-2", // Reduced padding from px-10
         nav: "space-x-1 flex items-center",
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
@@ -93,7 +93,13 @@ function Calendar({
                value={value?.toString()}
                onValueChange={(newValue) => handleChange(newValue)}
              >
-               <SelectTrigger className="h-7 w-full focus:ring-0 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent text-sm font-medium"> {/* Changed w-[45%] to w-full */}
+               <SelectTrigger 
+                 className={cn(
+                    "h-8 text-sm font-medium flex-1 rounded-md px-2 py-1", 
+                    "border border-input bg-input hover:bg-accent/10", // More prominent styling
+                    "focus:ring-ring focus:ring-2 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-0" // Standard focus
+                 )}
+                >
                  <SelectValue>{currentOption?.props.children}</SelectValue>
                </SelectTrigger>
                <SelectContent className="max-h-[var(--radix-select-content-available-height)] overflow-y-auto scrolling-touch">
@@ -118,6 +124,7 @@ function Calendar({
 Calendar.displayName = "Calendar"
 
 export { Calendar }
+
 
 
 
