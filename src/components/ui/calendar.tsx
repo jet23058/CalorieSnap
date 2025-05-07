@@ -31,7 +31,7 @@ function Calendar({
         month: "space-y-4 w-full", // Added w-full
         caption: "flex justify-center pt-1 relative items-center",
         caption_label: "text-sm font-medium hidden", // Hide default label when using dropdowns
-        caption_dropdowns: "flex justify-center gap-2 items-center w-full px-2", // Reduced padding from px-10
+        caption_dropdowns: "flex justify-center gap-2 items-center w-full px-2", // Ensure dropdowns can take full width
         nav: "space-x-1 flex items-center",
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
@@ -46,7 +46,7 @@ function Calendar({
         row: "flex w-full mt-2 justify-around", // Distribute cells evenly
         cell: cn(
           "h-9 w-[14.28%] text-center text-sm p-0 relative", // Use percentages
-          "[&:has([aria-selected])]:bg-accent [&:has([aria-selected])]:rounded-md", // Apply accent and rounding to the cell itself when selected
+          "[&:has([aria-selected])]:rounded-md", // Apply accent and rounding to the cell itself when selected
           "[&:has([aria-selected].day-outside)]:bg-accent/50", // Style for selected outside days
           "[&:has([aria-selected].day-range-end)]:rounded-r-md",
           "first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md"
@@ -72,11 +72,11 @@ function Calendar({
         ...classNames,
       }}
       components={{
-        IconLeft: ({ className, ...props }) => (
-          <ChevronLeft className={cn("h-4 w-4", className)} {...props} />
+        IconLeft: ({ className: iconClassName, ...iconProps }) => ( // Renamed className to avoid conflict
+          <ChevronLeft className={cn("h-4 w-4", iconClassName)} {...iconProps} />
         ),
-        IconRight: ({ className, ...props }) => (
-          <ChevronRight className={cn("h-4 w-4", className)} {...props} />
+        IconRight: ({ className: iconClassName, ...iconProps }) => (  // Renamed className to avoid conflict
+          <ChevronRight className={cn("h-4 w-4", iconClassName)} {...iconProps} />
         ),
         // Custom dropdown component using ShadCN Select
          Dropdown: ({ value, onChange, children, ...dropdownProps }: DropdownProps) => {
@@ -93,9 +93,9 @@ function Calendar({
                value={value?.toString()}
                onValueChange={(newValue) => handleChange(newValue)}
              >
-               <SelectTrigger 
+               <SelectTrigger
                  className={cn(
-                    "h-8 text-sm font-medium flex-1 rounded-md px-2 py-1", 
+                    "h-8 text-sm font-medium flex-1 rounded-md px-2 py-1",
                     "border border-input bg-input hover:bg-accent/10", // More prominent styling
                     "focus:ring-ring focus:ring-2 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-0" // Standard focus
                  )}
@@ -124,6 +124,7 @@ function Calendar({
 Calendar.displayName = "Calendar"
 
 export { Calendar }
+
 
 
 
