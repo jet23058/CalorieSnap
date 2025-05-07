@@ -619,7 +619,8 @@ export default function CalorieLogger() {
     }
 
     return new Promise((resolve) => {
-        const base64Image = canvas.toDataURL('image/jpeg', quality);
+        // Compress the image to 80% quality for AI and general use
+        const base64Image = canvas.toDataURL('image/jpeg', 0.8);
         if (!base64Image || base64Image === 'data:,') {
              console.error('畫布轉換為 data URL 失敗');
              resolve(null);
@@ -642,7 +643,6 @@ const handleCropConfirm = async () => {
 
     try {
         let imageToSendForEstimation: string | null = null;
-        let imageToDisplayInDialog: string | null = null;
 
         const isFullImageCrop =
             !completedCrop ||
@@ -653,34 +653,32 @@ const handleCropConfirm = async () => {
                 completedCrop.unit === '%');
 
         if (isFullImageCrop) {
-            // Compress the full image for AI, keeping original dimensions
+            // Compress the full image (original dimensions)
             imageToSendForEstimation = await getCroppedImg(imgRef.current, centerAspectCrop(imgRef.current.naturalWidth, imgRef.current.naturalHeight), 0.8); // 80% quality for AI
-            // For display, re-compress at slightly higher quality, still full dimensions
-            imageToDisplayInDialog = await getCroppedImg(imgRef.current, centerAspectCrop(imgRef.current.naturalWidth, imgRef.current.naturalHeight), 0.9);
         } else if (completedCrop?.width && completedCrop?.height) {
-            // Partial crop
+            // Partial crop, compressed
             imageToSendForEstimation = await getCroppedImg(imgRef.current, completedCrop, 0.8); // 80% quality for AI
-            imageToDisplayInDialog = await getCroppedImg(imgRef.current, completedCrop, 0.9); // 90% quality for display
         }
 
 
         if (imageToSendForEstimation) {
-            setImageForEstimationCard(imageToDisplayInDialog || imageSrc);
-            setShowEstimationDialog(true);
+            // Use the same (potentially cropped and compressed) image for both the estimation card and AI.
+            setImageForEstimationCard(imageToSendForEstimation);
+            setShowEstimationDialog(true); // Show estimation dialog
             await handleImageEstimation(imageToSendForEstimation);
         } else {
             setError('無法裁切影像。');
             toast({ variant: 'destructive', title: '錯誤', description: '無法裁切影像。' });
-            setImageForEstimationCard(imageSrc); // Fallback
+            setImageForEstimationCard(imageSrc); // Fallback to original if cropping fails
         }
     } catch (e) {
         console.error("裁切影像時發生錯誤:", e);
         setError('裁切影像時發生錯誤。');
         toast({ variant: 'destructive', title: '錯誤', description: '裁切影像時發生錯誤。' });
-        setImageForEstimationCard(imageSrc); // Fallback
+        setImageForEstimationCard(imageSrc); // Fallback to original
     } finally {
         setIsCropping(false); // Close crop dialog
-        // Do not set isLoading to false here, it's for AI estimation
+        // isLoading is handled by handleImageEstimation
     }
 };
 
@@ -2706,7 +2704,7 @@ const handleCropCancel = () => {
                          onChange={(e) => handleProfileChange('age', e.target.value)}
                          min="1" // Minimum age 1
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
-                         className="bg-input" // Ensure white background for edit
+                         className="bg-muted" 
                      />
                  </div>
                  {/* Gender */}
@@ -2717,7 +2715,7 @@ const handleCropCancel = () => {
                          onValueChange={(value) => handleProfileChange('gender', value)}
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
                       >
-                         <SelectTrigger id="gender" aria-label="選取生理性別" className="bg-input"> {/* Ensure white background for edit */}
+                         <SelectTrigger id="gender" aria-label="選取生理性別" className="bg-muted"> 
                              <SelectValue placeholder="選取生理性別" />
                          </SelectTrigger>
                          <SelectContent>
@@ -2739,7 +2737,7 @@ const handleCropCancel = () => {
                          onChange={(e) => handleProfileChange('height', e.target.value)}
                           min="1" // Minimum height 1cm
                           disabled={!isClient || isLoading} // Disable on server or during DB operation
-                          className="bg-input" // Ensure white background for edit
+                          className="bg-muted" 
                      />
                  </div>
                   {/* Weight */}
@@ -2754,7 +2752,7 @@ const handleCropCancel = () => {
                          min="1" // Minimum weight 1kg
                          step="0.1" // Allow decimal for weight
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
-                         className="bg-input" // Ensure white background for edit
+                         className="bg-muted"
                      />
                  </div>
                  {/* Activity Level */}
@@ -2765,7 +2763,7 @@ const handleCropCancel = () => {
                          onValueChange={(value) => handleProfileChange('activityLevel', value)}
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
                      >
-                         <SelectTrigger id="activityLevel" aria-label="選取活動水平" className="bg-input"> {/* Ensure white background for edit */}
+                         <SelectTrigger id="activityLevel" aria-label="選取活動水平" className="bg-muted"> 
                              <SelectValue placeholder="選取您的活動水平" />
                          </SelectTrigger>
                          <SelectContent>
@@ -2784,7 +2782,7 @@ const handleCropCancel = () => {
                          onValueChange={(value) => handleProfileChange('healthGoal', value)}
                          disabled={!isClient || isLoading} // Disable on server or during DB operation
                      >
-                         <SelectTrigger id="healthGoal" aria-label="選取健康目標" className="bg-input"> {/* Ensure white background for edit */}
+                         <SelectTrigger id="healthGoal" aria-label="選取健康目標" className="bg-muted"> 
                              <SelectValue placeholder="選取您的健康目標" />
                          </SelectTrigger>
                          <SelectContent>
@@ -2988,4 +2986,5 @@ const handleCropCancel = () => {
   
 
     
+
 
