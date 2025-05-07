@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, {
@@ -34,6 +35,7 @@ import {
   NotebookText, // Icon for Nutritionist Comments
   ArrowDownUp, // Icon for sorting
   Target, // Icon for Health Goal
+  ListChecks, // Icon for 7-day summary
 } from 'lucide-react';
 import {
   Tabs,
@@ -1280,6 +1282,26 @@ export default function CalorieLogger() {
 
    const yesterdayWaterGoalMet = yesterdayWaterIntake >= currentRecommendedWater;
 
+    // Calculate water intake for the last 7 days
+    const last7DaysWaterIntake = useMemo(() => {
+        if (!isClient) return [];
+        const today = startOfDay(new Date());
+        return Array.from({ length: 7 }).map((_, i) => {
+            const date = subDays(today, i);
+            const dateKey = format(date, 'yyyy-MM-dd');
+            const entries = waterLog[dateKey] || [];
+            const totalIntake = entries.reduce((total, entry) => total + entry.amount, 0);
+            const target = calculatedRecommendedWater ?? defaultWaterTarget;
+            const progress = target > 0 ? Math.min((totalIntake / target) * 100, 100) : 0;
+            return {
+                date,
+                totalIntake,
+                target,
+                progress,
+            };
+        }).reverse(); // Show oldest day first
+    }, [waterLog, isClient, calculatedRecommendedWater, defaultWaterTarget]);
+
 
   // --- Rendering ---
 
@@ -1860,6 +1882,44 @@ export default function CalorieLogger() {
         </ul>
     </div>
  );
+
+    const render7DayWaterSummary = () => {
+        if (authLoading || (user && dbLoading)) {
+            return <Skeleton className="h-72 w-full mt-6" />;
+        }
+        if (!user) return null; // Don't show if not logged in
+        if (dbError) return <Alert variant="destructive" className="mt-4"><AlertTitle>錯誤</AlertTitle><AlertDescription>無法載入飲水摘要：{dbError}</AlertDescription></Alert>;
+
+
+        return (
+            <Card className="mt-6 shadow-md">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <ListChecks size={24} className="text-blue-500" /> 近 7 日飲水摘要
+                    </CardTitle>
+                    <CardDescription>查看您過去一週的飲水習慣。</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {last7DaysWaterIntake.map((dayData) => (
+                        <div key={dayData.date.toISOString()} className="space-y-1">
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="font-medium text-foreground">
+                                    {format(dayData.date, 'MM/dd (EEE)', { locale: zhTW })}
+                                </span>
+                                <span className="text-muted-foreground">
+                                    {dayData.totalIntake} / {dayData.target} 毫升
+                                </span>
+                            </div>
+                            <Progress value={dayData.progress} aria-label={`${format(dayData.date, 'MM/dd')} 飲水進度 ${Math.round(dayData.progress)}%`} className="h-2" />
+                        </div>
+                    ))}
+                </CardContent>
+                <CardFooter className="text-xs text-muted-foreground">
+                    保持每日足夠飲水，有助於維持健康！
+                </CardFooter>
+            </Card>
+        );
+    };
 
 
  const renderWaterTracker = () => {
@@ -2674,6 +2734,7 @@ export default function CalorieLogger() {
              {/* Tab 2: Water Tracking & Profile Stats */}
             <TabsContent value="tracking" className="mt-0 h-full px-4 md:px-6"> {/* Add padding here */}
                 {renderWaterTracker()}
+                {render7DayWaterSummary()}
                 {renderProfileStats()} {/* Moved profile stats here */}
             </TabsContent>
 
@@ -2803,3 +2864,5 @@ export default function CalorieLogger() {
     </Tabs> // Close the top-level Tabs component
   );
 }
+
+  
