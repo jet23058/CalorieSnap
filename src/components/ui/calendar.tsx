@@ -95,7 +95,7 @@ function Calendar({
              >
                <SelectTrigger
                  className={cn(
-                    "h-8 text-sm font-medium flex-1 rounded-md px-2 py-1",
+                    "h-8 text-sm font-medium flex-1 rounded-md px-2 py-1 justify-center", // Added justify-center
                     "border border-input bg-input hover:bg-accent/10", 
                     "focus:ring-ring focus:ring-2 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-0",
                     dropdownProps.name === 'months' && "ml-[50px]",
@@ -126,6 +126,7 @@ function Calendar({
 Calendar.displayName = "Calendar"
 
 export { Calendar }
+
 
 
 
