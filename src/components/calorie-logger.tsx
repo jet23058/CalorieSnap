@@ -1,5 +1,3 @@
-
-
 "use client";
 
 import React, {
@@ -307,6 +305,7 @@ export default function CalorieLogger() {
   const [monthlySortCriteria, setMonthlySortCriteria] = useState<MonthlySortCriteria>('time-desc'); // State for monthly sorting
   const [activeTab, setActiveTab] = useState('logging'); // State for currently active tab
   const [showEstimationDialog, setShowEstimationDialog] = useState(false); // State for estimation result dialog
+  const [selectedAchievementDate, setSelectedAchievementDate] = useState<Date>(subDays(startOfDay(new Date()), 1)); // State for achievement date
 
   const { toast } = useToast();
 
@@ -619,8 +618,8 @@ export default function CalorieLogger() {
     }
 
     return new Promise((resolve) => {
-        // Compress the image to 80% quality for AI and general use
-        const base64Image = canvas.toDataURL('image/jpeg', 0.8);
+        // Compress the image to specified quality for AI and general use
+        const base64Image = canvas.toDataURL('image/jpeg', quality);
         if (!base64Image || base64Image === 'data:,') {
              console.error('畫布轉換為 data URL 失敗');
              resolve(null);
@@ -653,11 +652,11 @@ const handleCropConfirm = async () => {
                 completedCrop.unit === '%');
 
         if (isFullImageCrop) {
-            // Compress the full image (original dimensions)
-            imageToSendForEstimation = await getCroppedImg(imgRef.current, centerAspectCrop(imgRef.current.naturalWidth, imgRef.current.naturalHeight), 0.8); // 80% quality for AI
+            // Compress the full image (original dimensions) - use 80% quality for AI
+            imageToSendForEstimation = await getCroppedImg(imgRef.current, centerAspectCrop(imgRef.current.naturalWidth, imgRef.current.naturalHeight), 0.8);
         } else if (completedCrop?.width && completedCrop?.height) {
-            // Partial crop, compressed
-            imageToSendForEstimation = await getCroppedImg(imgRef.current, completedCrop, 0.8); // 80% quality for AI
+            // Partial crop, compressed - use 80% quality for AI
+            imageToSendForEstimation = await getCroppedImg(imgRef.current, completedCrop, 0.8);
         }
 
 
@@ -1297,16 +1296,15 @@ const handleCropCancel = () => {
    const currentRecommendedWater = calculatedRecommendedWater ?? defaultWaterTarget; // Use default if null
    const waterProgress = currentRecommendedWater ? Math.min((selectedDateWaterIntake / currentRecommendedWater) * 100, 100) : 0;
 
-   // Calculate yesterday's water intake and achievement from local aggregated state
-   const yesterdayWaterIntake = useMemo(() => {
-        if (!isClient) return 0;
-        const yesterdayDate = subDays(new Date(), 1);
-        const yesterdayKey = format(yesterdayDate, 'yyyy-MM-dd');
-        const entries = waterLog[yesterdayKey] || [];
+   // Calculate achievement date's water intake and achievement from local aggregated state
+   const achievementDateWaterIntake = useMemo(() => {
+        if (!isClient || !selectedAchievementDate) return 0;
+        const achievementDateKey = format(selectedAchievementDate, 'yyyy-MM-dd');
+        const entries = waterLog[achievementDateKey] || [];
         return entries.reduce((total, entry) => total + entry.amount, 0);
-   }, [waterLog, isClient]);
+   }, [waterLog, isClient, selectedAchievementDate]);
 
-   const yesterdayWaterGoalMet = yesterdayWaterIntake >= currentRecommendedWater;
+   const achievementDateWaterGoalMet = achievementDateWaterIntake >= currentRecommendedWater;
 
     // Calculate water intake for the last 7 days
     const last7DaysWaterData = useMemo(() => {
@@ -2165,7 +2163,7 @@ const handleCropCancel = () => {
 
             </CardContent>
             <CardFooter className="text-xs text-muted-foreground">
-                保持水分充足對健康至關重要！成人每日建議飲水 8 杯 (約 2000 毫升)。
+                保持水分充足對健康至关重要！成人每日建议饮水 8 杯 (约 2000 毫升)。
             </CardFooter>
         </Card>
     );
@@ -2173,13 +2171,11 @@ const handleCropCancel = () => {
 
  // --- Achievement Logic ---
 
- // Check if photo was logged yesterday
- const yesterdayPhotoLogged = useMemo(() => {
-    if (!isClient) return false;
-    const yesterdayDate = subDays(new Date(), 1);
-    // Check if any date in calorieLoggedDays matches yesterday
-    return calorieLoggedDays.some(date => isSameDay(date, yesterdayDate));
- }, [calorieLoggedDays, isClient]);
+ // Check if photo was logged on the selected achievement date
+ const achievementDatePhotoLogged = useMemo(() => {
+    if (!isClient || !selectedAchievementDate) return false;
+    return calorieLoggedDays.some(date => isSameDay(date, selectedAchievementDate));
+ }, [calorieLoggedDays, isClient, selectedAchievementDate]);
 
  // --- End Achievement Logic ---
 
@@ -2216,18 +2212,21 @@ const handleCropCancel = () => {
       }
 
 
-    const yesterdayKey = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+    const achievementDateKey = format(selectedAchievementDate, 'yyyy-MM-dd');
     // Ensure userProfile is checked before accessing its properties
-    const yesterdayTarget = calculateRecommendedWater(userProfile ?? {}) ?? defaultWaterTarget;
+    const achievementDateTarget = calculateRecommendedWater(userProfile ?? {}) ?? defaultWaterTarget;
+    const achievementDateFormatted = format(selectedAchievementDate, 'MM/dd');
+    const isToday = isSameDay(selectedAchievementDate, new Date());
+    const dateText = isToday ? "今日" : `${achievementDateFormatted}`;
 
 
     const getWaterAchievementBadge = () => {
-        if (yesterdayWaterGoalMet) {
+        if (achievementDateWaterGoalMet) {
             return (
                 <div className="text-center">
                     <Cat size={60} className="mx-auto text-yellow-500 drop-shadow-lg" />
                     <p className="mt-2 font-semibold text-primary">水分充足貓！</p>
-                    <p className="text-xs text-muted-foreground">昨天達成喝水目標！</p>
+                    <p className="text-xs text-muted-foreground">{dateText}達成喝水目標！</p>
                 </div>
             );
         } else {
@@ -2235,19 +2234,19 @@ const handleCropCancel = () => {
                  <div className="text-center">
                      <Cat size={60} className="mx-auto text-muted-foreground opacity-50" />
                      <p className="mt-2 font-semibold text-muted-foreground">再接再厲貓</p>
-                     <p className="text-xs text-muted-foreground">昨天未達成目標。今天加油！</p>
+                     <p className="text-xs text-muted-foreground">{dateText}未達成目標。{isToday ? '今天加油！' : ''}</p>
                  </div>
              );
         }
     };
 
      const getPhotoAchievementBadge = () => {
-         if (yesterdayPhotoLogged) {
+         if (achievementDatePhotoLogged) {
              return (
                  <div className="text-center">
                      <ImageIcon size={60} className="mx-auto text-green-500 drop-shadow-lg" />
                      <p className="mt-2 font-semibold text-primary">拍照記錄貓！</p>
-                     <p className="text-xs text-muted-foreground">昨天有拍照記錄！</p>
+                     <p className="text-xs text-muted-foreground">{dateText}有拍照記錄！</p>
                  </div>
              );
          } else {
@@ -2255,7 +2254,7 @@ const handleCropCancel = () => {
                  <div className="text-center">
                      <ImageIcon size={60} className="mx-auto text-muted-foreground opacity-50" />
                      <p className="mt-2 font-semibold text-muted-foreground">害羞拍照貓</p>
-                     <p className="text-xs text-muted-foreground">昨天沒有拍照記錄。</p>
+                     <p className="text-xs text-muted-foreground">{dateText}沒有拍照記錄。</p>
                  </div>
              );
          }
@@ -2263,25 +2262,69 @@ const handleCropCancel = () => {
 
     return (
         <>
+            {/* Date Picker for Achievements */}
+            <div className="flex justify-center my-4">
+                 <Card className="w-auto inline-block shadow-md">
+                    <CardContent className="p-2">
+                        <Calendar
+                            mode="single"
+                            selected={selectedAchievementDate}
+                            onSelect={(date) => date && setSelectedAchievementDate(startOfDay(date))}
+                            className="rounded-md p-0"
+                            classNames={{
+                                months: "flex flex-col sm:flex-row w-full",
+                                month: "space-y-4 w-full",
+                                caption_dropdowns: "flex justify-center gap-2 items-center w-full px-2",
+                                table: "w-full border-collapse space-y-1",
+                                head_row: "flex justify-around",
+                                head_cell: "text-muted-foreground rounded-md w-[14.28%] font-normal text-[0.8rem]",
+                                row: "flex w-full mt-2 justify-around",
+                                cell: cn(
+                                  "h-9 w-[14.28%] text-center text-sm p-0 relative",
+                                  "[&:has([aria-selected])]:rounded-md",
+                                  "[&:has([aria-selected].day-outside)]:bg-accent/50",
+                                  "[&:has([aria-selected].day-range-end)]:rounded-r-md",
+                                  "first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md"
+                                ),
+                                day: cn(
+                                   buttonVariants({ variant: "ghost" }),
+                                   "h-9 w-full p-0 font-normal aria-selected:opacity-100",
+                                   "focus-visible:ring-0 focus-visible:ring-offset-0"
+                                ),
+                                day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
+                                day_today: "bg-accent text-accent-foreground",
+                                day_outside: "day-outside text-muted-foreground/50 aria-selected:bg-accent/30 aria-selected:text-muted-foreground/50",
+                                day_disabled: "text-muted-foreground opacity-50",
+                                day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
+                             }}
+                             disabled={date => date > new Date() || date < new Date("1900-01-01")} // Disable future dates
+                             locale={zhTW}
+                             captionLayout="dropdown-buttons"
+                             fromYear={2020}
+                             toYear={new Date().getFullYear()}
+                        />
+                    </CardContent>
+                </Card>
+            </div>
             {/* Water Achievement Card */}
             <Card className="mt-6 shadow-md">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                         <Trophy size={24} className="text-yellow-600" /> 飲水成就
                     </CardTitle>
-                    <CardDescription>看看您昨天的喝水表現！</CardDescription>
+                    <CardDescription>看看您 {dateText} 的喝水表現！</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="grid grid-cols-2 gap-4 items-center">
-                        {/* Yesterday's Water Stats */}
+                        {/* Achievement Date's Water Stats */}
                         <div className="text-center border-r pr-4">
-                             <p className="text-xs text-muted-foreground">昨日 ({format(subDays(new Date(), 1), 'MM/dd')})</p>
-                            <p className="text-2xl font-bold text-blue-600">{yesterdayWaterIntake} <span className="text-sm font-normal">毫升</span></p>
-                            <p className="text-xs text-muted-foreground">目標：{yesterdayTarget} 毫升</p>
+                             <p className="text-xs text-muted-foreground">{dateText}</p>
+                            <p className="text-2xl font-bold text-blue-600">{achievementDateWaterIntake} <span className="text-sm font-normal">毫升</span></p>
+                            <p className="text-xs text-muted-foreground">目標：{achievementDateTarget} 毫升</p>
                             <Progress
-                               value={yesterdayTarget > 0 ? Math.min((yesterdayWaterIntake / yesterdayTarget) * 100, 100) : 0}
+                               value={achievementDateTarget > 0 ? Math.min((achievementDateWaterIntake / achievementDateTarget) * 100, 100) : 0}
                                className="h-2 mt-2"
-                               aria-label={`昨日飲水進度 ${Math.round(yesterdayTarget > 0 ? (yesterdayWaterIntake / yesterdayTarget) * 100 : 0)}%`}
+                               aria-label={`${dateText}飲水進度 ${Math.round(achievementDateTarget > 0 ? (achievementDateWaterIntake / achievementDateTarget) * 100 : 0)}%`}
                             />
                         </div>
                         {/* Water Achievement Badge */}
@@ -2299,15 +2342,15 @@ const handleCropCancel = () => {
                      <CardTitle className="flex items-center gap-2">
                          <ImageIcon size={24} className="text-green-600" /> 拍照記錄成就
                      </CardTitle>
-                     <CardDescription>看看您昨天的拍照記錄習慣！</CardDescription>
+                     <CardDescription>看看您 {dateText} 的拍照記錄習慣！</CardDescription>
                  </CardHeader>
                  <CardContent>
                       <div className="grid grid-cols-2 gap-4 items-center">
-                         {/* Yesterday's Photo Log Status */}
+                         {/* Achievement Date's Photo Log Status */}
                          <div className="text-center border-r pr-4">
-                             <p className="text-xs text-muted-foreground">昨日 ({format(subDays(new Date(), 1), 'MM/dd')})</p>
-                              <p className={`text-2xl font-bold ${yesterdayPhotoLogged ? 'text-green-600' : 'text-muted-foreground'}`}>
-                                 {yesterdayPhotoLogged ? '已記錄' : '未記錄'}
+                             <p className="text-xs text-muted-foreground">{dateText}</p>
+                              <p className={`text-2xl font-bold ${achievementDatePhotoLogged ? 'text-green-600' : 'text-muted-foreground'}`}>
+                                 {achievementDatePhotoLogged ? '已記錄' : '未記錄'}
                               </p>
                               <p className="text-xs text-muted-foreground">目標：每日記錄</p>
                          </div>
@@ -2982,9 +3025,3 @@ const handleCropCancel = () => {
     </Tabs> // Close the top-level Tabs component
   );
 }
-
-  
-
-    
-
-
