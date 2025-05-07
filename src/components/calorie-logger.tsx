@@ -263,7 +263,7 @@ function convertLocalDateTimeStringToTimestamp(localDateTimeString: string): Tim
         return Timestamp.fromDate(date); // Convert JS Date to Firestore Timestamp
     } catch (e) {
         console.error("Error converting local datetime string to Timestamp:", e);
-        return null;
+        return ''; // Return empty string on error to avoid breaking input fields expecting string
     }
 }
 
@@ -571,41 +571,35 @@ export default function CalorieLogger() {
   }
 
 
-  const getCroppedImg = (image: HTMLImageElement, cropData: Crop, quality: number = 0.8): Promise<string | null> => { // Adjusted default quality to 0.8 (80%)
+  const getCroppedImg = (image: HTMLImageElement, cropData: Crop, quality: number = 0.8): Promise<string | null> => {
     const canvas = document.createElement('canvas');
-    const scaleX = image.naturalWidth / image.width;
-    const scaleY = image.naturalHeight / image.height;
-    const pixelRatio = window.devicePixelRatio || 1; // Consider device pixel ratio for sharpness
+    // For "full image crop", use naturalWidth/Height to ensure original dimensions are preserved before compression.
+    // For partial crops, use the cropData dimensions.
+    const isFullImageCrop = cropData.width === 100 && cropData.height === 100 && cropData.x === 0 && cropData.y === 0 && cropData.unit === '%';
 
-     // Ensure crop dimensions are positive
-     const cropWidth = Math.max(1, cropData.width);
-     const cropHeight = Math.max(1, cropData.height);
-
-     // Calculate canvas dimensions based on crop and pixel ratio
-     canvas.width = Math.floor(cropWidth * scaleX * pixelRatio);
-     canvas.height = Math.floor(cropHeight * scaleY * pixelRatio);
+    canvas.width = isFullImageCrop ? image.naturalWidth : Math.floor(cropData.width * (image.naturalWidth / image.width));
+    canvas.height = isFullImageCrop ? image.naturalHeight : Math.floor(cropData.height * (image.naturalHeight / image.height));
 
     const ctx = canvas.getContext('2d');
     if (!ctx) {
         console.error('無法取得 2D 畫布內容');
         return Promise.resolve(null);
     }
+    ctx.imageSmoothingQuality = 'high';
 
-     // Scale context for higher resolution drawing
-     ctx.scale(pixelRatio, pixelRatio);
-     ctx.imageSmoothingQuality = 'high'; // Prefer higher quality smoothing
+    const scaleX = image.naturalWidth / image.width;
+    const scaleY = image.naturalHeight / image.height;
 
-     // Calculate source and destination crop coordinates
-     const sourceX = cropData.x * scaleX;
-     const sourceY = cropData.y * scaleY;
-     const sourceWidth = cropWidth * scaleX;
-     const sourceHeight = cropHeight * scaleY;
+    const sourceX = cropData.x * scaleX;
+    const sourceY = cropData.y * scaleY;
+    const sourceWidth = cropData.width * scaleX;
+    const sourceHeight = cropData.height * scaleY;
 
-     // Destination coordinates on the scaled canvas (always 0,0)
-     const destX = 0;
-     const destY = 0;
-     const destWidth = cropWidth; // Draw at the target crop size (before pixel ratio scaling)
-     const destHeight = cropHeight;
+    // Destination is always (0,0) up to canvas.width/height because the canvas is already sized correctly.
+    const destX = 0;
+    const destY = 0;
+    const destWidth = canvas.width;
+    const destHeight = canvas.height;
 
     try {
        ctx.drawImage(
@@ -625,7 +619,6 @@ export default function CalorieLogger() {
     }
 
     return new Promise((resolve) => {
-        // Use 'image/jpeg' for better compression, use the provided quality
         const base64Image = canvas.toDataURL('image/jpeg', quality);
         if (!base64Image || base64Image === 'data:,') {
              console.error('畫布轉換為 data URL 失敗');
@@ -637,21 +630,20 @@ export default function CalorieLogger() {
   };
 
 const handleCropConfirm = async () => {
-    if (!imgRef.current || !imageSrc) { // Ensure imageSrc (original) is available
+    if (!imgRef.current || !imageSrc) {
         toast({ variant: 'destructive', title: '錯誤', description: '沒有影像可裁切。' });
         setIsCropping(false);
         return;
     }
 
-    setIsLoading(true); // For the AI estimation that follows
+    setIsLoading(true);
     setError(null);
-    setEstimation(null); // Clear previous estimation
+    setEstimation(null);
 
     try {
         let imageToSendForEstimation: string | null = null;
-        let imageToDisplayInDialog: string | null = imageSrc; // Default to original for display
+        let imageToDisplayInDialog: string | null = null;
 
-        // Check if an actual crop was made (not just full image selection)
         const isFullImageCrop =
             !completedCrop ||
             (completedCrop.width === 100 &&
@@ -661,35 +653,34 @@ const handleCropConfirm = async () => {
                 completedCrop.unit === '%');
 
         if (isFullImageCrop) {
-            // If full image is "cropped", send a compressed version for estimation
-            // but keep the original-like quality for display
+            // Compress the full image for AI, keeping original dimensions
             imageToSendForEstimation = await getCroppedImg(imgRef.current, centerAspectCrop(imgRef.current.naturalWidth, imgRef.current.naturalHeight), 0.8); // 80% quality for AI
-            imageToDisplayInDialog = imageSrc; // Display original high quality
+            // For display, re-compress at slightly higher quality, still full dimensions
+            imageToDisplayInDialog = await getCroppedImg(imgRef.current, centerAspectCrop(imgRef.current.naturalWidth, imgRef.current.naturalHeight), 0.9);
         } else if (completedCrop?.width && completedCrop?.height) {
-            // If an actual partial crop was made
-            // Generate a version for AI (lower quality)
+            // Partial crop
             imageToSendForEstimation = await getCroppedImg(imgRef.current, completedCrop, 0.8); // 80% quality for AI
-            // Generate a version for display dialog (higher quality, reflecting the crop)
             imageToDisplayInDialog = await getCroppedImg(imgRef.current, completedCrop, 0.9); // 90% quality for display
         }
 
+
         if (imageToSendForEstimation) {
-            setImageForEstimationCard(imageToDisplayInDialog || imageSrc); // Update image for estimation dialog
-            setShowEstimationDialog(true); // Show the estimation dialog
-            await handleImageEstimation(imageToSendForEstimation); // Send (potentially compressed/cropped) for estimation
+            setImageForEstimationCard(imageToDisplayInDialog || imageSrc);
+            setShowEstimationDialog(true);
+            await handleImageEstimation(imageToSendForEstimation);
         } else {
             setError('無法裁切影像。');
             toast({ variant: 'destructive', title: '錯誤', description: '無法裁切影像。' });
-            setImageForEstimationCard(imageSrc); // Fallback to original if cropping fails
+            setImageForEstimationCard(imageSrc); // Fallback
         }
     } catch (e) {
         console.error("裁切影像時發生錯誤:", e);
         setError('裁切影像時發生錯誤。');
         toast({ variant: 'destructive', title: '錯誤', description: '裁切影像時發生錯誤。' });
-        setImageForEstimationCard(imageSrc); // Fallback to original on error
+        setImageForEstimationCard(imageSrc); // Fallback
     } finally {
-        // setIsLoading(false); // isLoading is for the AI estimation, not for closing crop dialog
-        setIsCropping(false); // Close crop dialog regardless of AI outcome
+        setIsCropping(false); // Close crop dialog
+        // Do not set isLoading to false here, it's for AI estimation
     }
 };
 
@@ -897,11 +888,12 @@ const handleCropCancel = () => {
     if (!locationToLog || locationToLog === '正在獲取...' || locationToLog.startsWith('無法') || locationToLog.startsWith('瀏覽器')) {
         if (!isFetchingLocation) {
             fetchCurrentLocation();
-            locationToLog = currentLocation;
+            locationToLog = currentLocation; // Use potentially updated location
         } else {
              locationToLog = null; // Don't log 'loading' or 'error' states
         }
     }
+
 
     const entryTime = new Date(); // Use current time for the log entry
     const baseEntryData = {
@@ -2996,3 +2988,4 @@ const handleCropCancel = () => {
   
 
     
+
